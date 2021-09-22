@@ -113,6 +113,9 @@ public:
     //! Optional duration [µs] after which the trajectory calculation is (softly) interrupted (only in Ruckig Pro)
     std::optional<double> interrupt_calculation_duration;
 
+    //! Optional final accelaration phase
+    std::optional<bool> final_acceleration_phase;
+
     template <size_t D = DOFs, typename std::enable_if<D >= 1, int>::type = 0>
     InputParameter(): degrees_of_freedom(DOFs) {
         initialize();
@@ -151,6 +154,7 @@ public:
             || synchronization != rhs.synchronization
             || duration_discretization != rhs.duration_discretization
             || per_dof_control_interface != rhs.per_dof_control_interface
+            || final_acceleration_phase != rhs.final_acceleration_phase
             || per_dof_synchronization != rhs.per_dof_synchronization
         );
     }
@@ -171,6 +175,10 @@ public:
         }
         if (min_acceleration) {
             ss << "inp.min_acceleration = [" << join(min_acceleration.value()) << "]\n";
+        }
+        if (final_acceleration_phase)
+        {
+            ss << "inp.final_acceleration_phase = [" << (final_acceleration_phase ? "true" : "false") << "]\n";
         }
         if (!intermediate_positions.empty()) {
             ss << "inp.intermediate_positions = [\n";

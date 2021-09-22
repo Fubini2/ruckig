@@ -6,8 +6,12 @@
 __pycache__
 *.egg-info
 
-build
 dist
 local
 reflexxes
 ruckig-pro-*
+
+# typical cmake build folders
+[Bb]uild/
+[Bb]uild32/
+[Bb]uild64/

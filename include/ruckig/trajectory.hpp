@@ -28,6 +28,7 @@ class Trajectory {
     Container<double> cumulative_times;
 
     Vector<double> independent_min_durations;
+    Vector<double> pfs, vfs, afs; // Ending point of profiles without acceleration trajectory
     Vector<PositionExtrema> position_extrema;
 
 public:
@@ -42,6 +43,42 @@ public:
         profiles[0].resize(dofs);
         independent_min_durations.resize(dofs);
         position_extrema.resize(dofs);
+            pfs[dof] = inp.target_position[dof];
+            vfs[dof] = inp.target_velocity[dof];
+            afs[dof] = inp.target_acceleration[dof];
+
+            // Calculate acceleration (if input exceeds or will exceed limits at target)
+            // Since the calculation of initial initial brake phase and final acceleration phase 
+            // are symmetrical we get the acceleration phase by changing the acceleration sign 
+            // (braking is now accelerating) and time inversion in the integration step.
+            if (inp.final_acceleration_phase)
+            {
+                switch (inp.control_interface)
+                {
+                    case ControlInterface::Position:
+                    {
+                        //Brake::get_position_brake_trajectory(inp.target_velocity[dof], (-1.0)*inp.target_acceleration[dof], inp.max_velocity[dof], inp_min_velocity[dof], 1E-10, -1E-10, inp.max_jerk[dof], p.t_accels, p.j_accels);
+                        Brake::get_position_brake_trajectory(inp.target_velocity[dof], (-1.0)*inp.target_acceleration[dof], inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof], inp.max_jerk[dof], p.t_accels, p.j_accels);
+                    } break;
+                    case ControlInterface::Velocity:
+                    {
+                        //Brake::get_velocity_brake_trajectory(inp.target_acceleration[dof], 1E-10, -1E-10, inp.max_jerk[dof], p.t_accels, p.j_accels);
+                        Brake::get_velocity_brake_trajectory(inp.target_acceleration[dof], inp.max_acceleration[dof], inp_min_acceleration[dof], inp.max_jerk[dof], p.t_accels, p.j_accels);
+                    } break;
+                }
+
+                // Integrate accelartion post-trajectory
+                p.t_accel = p.t_accels[0] + p.t_accels[1];
+                for (size_t i = 0; i < 2 && p.t_accels[i] > 0; ++i)
+                {
+                    p.p_accels[i] = pfs[dof];
+                    p.v_accels[i] = vfs[dof];
+                    p.a_accels[i] = afs[dof];
+                    std::tie(pfs[dof], vfs[dof], afs[dof]) = Profile::integrate((-1.0)*p.t_accels[i], pfs[dof], vfs[dof], afs[dof], p.j_accels[i]);
+                }
+            }
+
+            {
     }
 
     //! Get the kinematic state at a given time
@@ -54,16 +91,31 @@ public:
             }
         }
 
-        if (time >= duration) {
-            // Keep constant acceleration
-            new_section = profiles.size();
-            auto& profiles_dof = profiles.back();
-            for (size_t dof = 0; dof < degrees_of_freedom; ++dof) {
-                const double t_pre = (profiles.size() > 1) ? cumulative_times[cumulative_times.size() - 2] : profiles_dof[dof].brake.duration;
-                const double t_diff = time - (t_pre + profiles_dof[dof].t_sum[6]);
-                std::tie(new_position[dof], new_velocity[dof], new_acceleration[dof]) = Profile::integrate(t_diff, profiles_dof[dof].pf, profiles_dof[dof].vf, profiles_dof[dof].af, 0);
+
+        for (size_t dof = 0; dof < profiles.size(); ++dof) {
+            const Profile& p = profiles[dof];
+
+            if (time >= duration - p.accel.duration) {
+                if (p.t_accel) {
+                    double t_diff = duration - time;
+                    if (t_diff < p.accel.duration) {
+                        const size_t index = (t_diff > p.accel.t[0]) ? 1 : 0;
+                        if (index > 0) {
+                            t_diff -= p.accel.t[index - 1];
+                        }
+
+                        std::tie(new_position[dof], new_velocity[dof], new_acceleration[dof]) = Profile::integrate((-1.0)*t_diff, p.accel.p[index], p.accel.v[index], p.accel.a[index], p.accel.j[index]);
+                        continue;
+                    } else {
+                        t_diff -= p.accel.duration;
+                    }
+                }
+                else {
+                    // Keep constant acceleration
+                    std::tie(new_position[dof], new_velocity[dof], new_acceleration[dof]) = Profile::integrate(time - duration, p.pf, p.vf, p.af, 0);
+                }
+                return;
             }
-            return;
         }
 
         const auto new_section_ptr = std::upper_bound(cumulative_times.begin(), cumulative_times.end(), time);
