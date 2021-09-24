@@ -101,14 +101,14 @@ public:
             if (input.control_interface == ControlInterface::Position) {
                 if (input.min_velocity) {
                     if (input.target_velocity[dof] > input.max_velocity[dof] || input.target_velocity[dof] < input.min_velocity.value()[dof]) {
-                        if ((input.final_acceleration_phase == std::nullopt) || (input.final_acceleration_phase == false)) {
+                        if ((input.final_acceleration_phase == std::nullopt) || (input.final_acceleration_phase.value() == false)) {
                             return false;
                         }
                     }
 
                 } else {
                     if (std::abs(input.target_velocity[dof]) > input.max_velocity[dof]) {
-                        if ((input.final_acceleration_phase == std::nullopt) || (input.final_acceleration_phase == false)) {
+                        if ((input.final_acceleration_phase == std::nullopt) || (input.final_acceleration_phase.value() == false)) {
                             return false;
                         }
                     }
@@ -117,14 +117,14 @@ public:
 
             if (input.min_acceleration) {
                 if (input.target_acceleration[dof] > input.max_acceleration[dof] || input.target_acceleration[dof] < input.min_acceleration.value()[dof]) {
-                    if ((input.final_acceleration_phase == std::nullopt) || (input.final_acceleration_phase == false)) {
+                    if ((input.final_acceleration_phase == std::nullopt) || (input.final_acceleration_phase.value() == false)) {
                         return false;
                     }
                 }
 
             } else {
                 if (std::abs(input.target_acceleration[dof]) > input.max_acceleration[dof]) {
-                    if ((input.final_acceleration_phase == std::nullopt) || (input.final_acceleration_phase == false)) {
+                    if ((input.final_acceleration_phase == std::nullopt) || (input.final_acceleration_phase.value() == false)) {
                         return false;
                     }
                 }

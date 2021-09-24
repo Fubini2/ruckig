@@ -51,7 +51,7 @@ public:
             // Since the calculation of initial initial brake phase and final acceleration phase 
             // are symmetrical we get the acceleration phase by changing the acceleration sign 
             // (braking is now accelerating) and time inversion in the integration step.
-            if (inp.final_acceleration_phase)
+            if (inp.final_acceleration_phase && inp.final_acceleration_phase.value() == true)
             {
                 switch (inp.control_interface)
                 {
@@ -95,9 +95,11 @@ public:
         for (size_t dof = 0; dof < profiles.size(); ++dof) {
             const Profile& p = profiles[dof];
 
+            double t_diff = time;
             if (time >= duration - p.accel.duration) {
+
                 if (p.t_accel) {
-                    double t_diff = duration - time;
+                    t_diff = duration - time;
                     if (t_diff < p.accel.duration) {
                         const size_t index = (t_diff > p.accel.t[0]) ? 1 : 0;
                         if (index > 0) {
@@ -110,17 +112,10 @@ public:
                         t_diff -= p.accel.duration;
                     }
                 }
-                else {
-                    // Keep constant acceleration
-                    std::tie(new_position[dof], new_velocity[dof], new_acceleration[dof]) = Profile::integrate(time - duration, p.pf, p.vf, p.af, 0);
-                }
-                return;
             }
-        }
-
         const auto new_section_ptr = std::upper_bound(cumulative_times.begin(), cumulative_times.end(), time);
         new_section = std::distance(cumulative_times.begin(), new_section_ptr);
-        double t_diff = time;
+            
         if (new_section > 0) {
             t_diff -= cumulative_times[new_section - 1];
         }

@@ -178,7 +178,7 @@ public:
         }
         if (final_acceleration_phase)
         {
-            ss << "inp.final_acceleration_phase = [" << (final_acceleration_phase ? "true" : "false") << "]\n";
+            ss << "inp.final_acceleration_phase = [" << (final_acceleration_phase.value() ? "true" : "false") << "]\n";
         }
         if (!intermediate_positions.empty()) {
             ss << "inp.intermediate_positions = [\n";
