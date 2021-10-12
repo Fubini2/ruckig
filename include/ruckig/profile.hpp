@@ -196,11 +196,31 @@ public:
 
         // Velocity limit can be broken in the beginning if both initial velocity and acceleration are too high
         // std::cout << std::setprecision(16) << "target: " << std::abs(p[7]-pf) << " " << std::abs(v[7] - vf) << " " << std::abs(a[7] - af) << " T: " << t_sum[6] << " " << to_string() << std::endl;
-        return std::abs(p[7] - pf) < 1e-8 && std::abs(v[7] - vf) < 1e-8 && std::abs(a[7] - af) < 1e-10
+        bool Result = std::abs(p[7] - pf) < 1e-8 && std::abs(v[7] - vf) < 1e-8 && std::abs(a[7] - af) < 1e-10
             && a[1] >= aLowLim && a[3] >= aLowLim && a[5] >= aLowLim
             && a[1] <= aUppLim && a[3] <= aUppLim && a[5] <= aUppLim
-            && v[3] <= vUppLim && v[4] <= vUppLim && v[5] <= vUppLim && v[6] <= vUppLim
-            && v[3] >= vLowLim && v[4] >= vLowLim && v[5] >= vLowLim && v[6] >= vLowLim;
+            && v[3] <= vUppLim && v[4] <= vUppLim 
+            && v[3] >= vLowLim && v[4] >= vLowLim;
+
+        if (   (t_accel > 1e-12) 
+            && (   ((vf > 0) ? (vf > vMax) : (vf < vMin)) 
+                || ((af > 0) ? (af > aMax) : (af < aMin))))
+        {
+            // Velocity limit can be broken in the beginning of the acceleration phase if both final velocity and acceleration 
+            // are too high. Therefore in case of a final acceleration phase allow slight violations of some velocity limits.
+            Result = Result && (v[5] <= vUppLim + 1e-1) 
+                            && (v[5] >= vLowLim - 1e-1) 
+                            && (v[6] <= vUppLim + 1e-1) 
+                            && (v[6] >= vLowLim - 1e-1);
+        }
+        else
+        {
+            // No final acceleration phase
+            Result = Result && v[5] <= vUppLim && v[5] >= vLowLim && v[6] <= vUppLim && v[6] >= vLowLim;
+
+        }
+
+        return Result;
     }
 
     template<JerkSigns jerk_signs, Limits limits>

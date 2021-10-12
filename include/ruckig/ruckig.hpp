@@ -136,7 +136,9 @@ public:
                 const double v_diff = std::min(std::abs(input.max_velocity[dof] - input.target_velocity[dof]), std::abs(min_velocity - input.target_velocity[dof]));
                 const double max_target_acceleration = std::sqrt(2 * input.max_jerk[dof] * v_diff);
                 if (std::abs(input.target_acceleration[dof]) > max_target_acceleration) {
-                    return false;
+                    if ((input.final_acceleration_phase == std::nullopt) || (input.final_acceleration_phase.value() == false)) {
+                       return false;
+                    }
                 }
             }
         }
