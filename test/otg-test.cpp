@@ -1,8 +1,8 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
 
-#include <random>
 #include "randomizer.hpp"
+#include <random>
 
 #include <ruckig/ruckig.hpp>
 
@@ -58,7 +58,6 @@ inline void check_calculation(OTGType& otg, InputParameter<DOFs>& input) {
     }
 }
 
-
 template<size_t DOFs, class OTGType>
 inline size_t step_through_and_check_calculation(OTGType& otg, InputParameter<DOFs>& input, size_t max_number_checks) {
     OutputParameter<DOFs> output;
@@ -112,6 +111,7 @@ inline void check_array(const T& first, const T& second) {
 }
 
 
+#ifdef NOT_ONLY_SCALING
 TEST_CASE("secondary" * doctest::description("Secondary Features")) {
     Ruckig<3, true> otg {0.005};
     InputParameter<3> input;
@@ -922,6 +922,202 @@ TEST_CASE("random_3" * doctest::description("Random input with 3 DoF and target 
         check_calculation(otg, input);
     }
 }
+#endif // NOT_ONLY_SCALING
+
+static const double EPS_1E_12 = 1e-12;
+
+template<size_t DOFs>
+static ruckig::InputParameter<DOFs> setFinalAccPhaseIfNecessary(const ruckig::InputParameter<DOFs>& Input)
+{
+    ruckig::InputParameter<DOFs> Output = Input;
+    
+    Output.final_acceleration_phase = false;
+    for (uint32_t i = 0; i < Output.degrees_of_freedom; ++i)
+    {
+        if (std::abs(Output.target_velocity[i]) > Output.max_velocity[i])
+        {
+            Output.final_acceleration_phase = true;
+        }
+        if (std::abs(Output.target_acceleration[i]) > Output.max_acceleration[i])
+        {
+            Output.final_acceleration_phase = true;
+        }
+
+        // Target acceleration needs to be accessible from "above" and "below" inside ruckig.
+        // Hence if the condition on the target acceleration is violated we set the target
+        // acceleration to the maximal allowed value and let the final acceleration phase do the rest.
+        // This strategy might not lead to the time optimal solution for this case but at least it gives
+        // us a solution with ruckig.
+        const double min_velocity = -Output.max_velocity[i];
+        const double v_diff = std::min(std::abs(Output.max_velocity[i] - Output.target_velocity[i]), std::abs(min_velocity - Output.target_velocity[i]));
+        const double max_target_acceleration = std::sqrt(2 * Output.max_jerk[i] * v_diff);
+        if (std::abs(Output.target_acceleration[i]) > max_target_acceleration)
+        {
+            Output.final_acceleration_phase = true;
+            Output.target_acceleration[i] = std::clamp(Output.target_acceleration[i], -max_target_acceleration + EPS_1E_12, max_target_acceleration - EPS_1E_12);
+        }
+    }
+    return Output;
+}
+
+template<size_t DOFs>
+void scaleInput_j1(ruckig::InputParameter<DOFs>& OtgInput)
+{
+    // Scale that maximal jerk gets 1.0
+    const double TimeScale = std::cbrt(std::max({ OtgInput.max_jerk[0], OtgInput.max_jerk[1], OtgInput.max_jerk[2] }));
+    const double TimeScale2 = TimeScale * TimeScale;
+    const double TimeScale3 = TimeScale2 * TimeScale;
+
+    for (int32_t i = 0; i < DOFs; ++i)
+    {
+        // activate dof
+        OtgInput.enabled[i] = true;
+
+        // kinematic bounds
+        OtgInput.max_velocity[i] = OtgInput.max_velocity[i] / TimeScale;
+        OtgInput.max_acceleration[i] = OtgInput.max_acceleration[i] / TimeScale2;
+        OtgInput.max_jerk[i] = OtgInput.max_jerk[i] / TimeScale3;
+
+        // start state
+        OtgInput.current_position[i] = OtgInput.current_position[i];
+        OtgInput.current_velocity[i] = OtgInput.current_velocity[i] / TimeScale;
+        OtgInput.current_acceleration[i] = OtgInput.current_acceleration[i] / TimeScale2;
+
+        // desired target state
+        OtgInput.target_position[i] = OtgInput.target_position[i];
+        OtgInput.target_velocity[i] = OtgInput.target_velocity[i] / TimeScale;
+        OtgInput.target_acceleration[i] = OtgInput.target_acceleration[i] / TimeScale2;
+    }
+}
+
+template<size_t DOFs>
+void scaleInput_v1_j1(ruckig::InputParameter<DOFs>& OtgInput)
+{
+    // Scale that maximal velocity and jerk both get value 1.0
+    const double PosScale = std::sqrt(std::max({ std::pow(OtgInput.max_velocity[0], 3) / OtgInput.max_jerk[0],
+                                                 std::pow(OtgInput.max_velocity[1], 3) / OtgInput.max_jerk[1],
+                                                 std::pow(OtgInput.max_velocity[2], 3) / OtgInput.max_jerk[2] }));
+    const double TimeScale = std::sqrt(std::max({ OtgInput.max_velocity[0] / OtgInput.max_jerk[0],
+                                                  OtgInput.max_velocity[1] / OtgInput.max_jerk[1],
+                                                  OtgInput.max_velocity[2] / OtgInput.max_jerk[2] }));
+    const double TimeScale2 = TimeScale * TimeScale;
+    const double TimeScale3 = TimeScale2 * TimeScale;
+
+    for (int32_t i = 0; i < DOFs; ++i)
+    {
+        // activate dof
+        OtgInput.enabled[i] = true;
+
+        // kinematic bounds
+        OtgInput.max_velocity[i] = (OtgInput.max_velocity[i] * TimeScale) / PosScale;
+        OtgInput.max_acceleration[i] = (OtgInput.max_acceleration[i] * TimeScale2) / PosScale;
+        OtgInput.max_jerk[i] = (OtgInput.max_jerk[i] * TimeScale3) / PosScale;
+
+        // start state
+        OtgInput.current_position[i] = OtgInput.current_position[i] / PosScale;
+        OtgInput.current_velocity[i] = (OtgInput.current_velocity[i] * TimeScale) / PosScale;
+        OtgInput.current_acceleration[i] = (OtgInput.current_acceleration[i] * TimeScale2) / PosScale;
+
+        // desired target state
+        OtgInput.target_position[i] = OtgInput.target_position[i] / PosScale;
+        OtgInput.target_velocity[i] = (OtgInput.target_velocity[i] * TimeScale) / PosScale;
+        OtgInput.target_acceleration[i] = (OtgInput.target_acceleration[i] * TimeScale2) / PosScale;
+    }
+}
+
+template<size_t DOFs>
+void scaleInput_v100_j1(ruckig::InputParameter<DOFs>& OtgInput)
+{
+    // Scale that maximal velocity and jerk both get value 1.0
+    const double PosScale = std::sqrt(std::max({ std::pow(OtgInput.max_velocity[0]*0.01, 3) / OtgInput.max_jerk[0],
+                                                 std::pow(OtgInput.max_velocity[1]*0.01, 3) / OtgInput.max_jerk[1],
+                                                 std::pow(OtgInput.max_velocity[2]*0.01, 3) / OtgInput.max_jerk[2] }));
+    const double TimeScale = std::sqrt(std::max({ OtgInput.max_velocity[0]*0.01 / OtgInput.max_jerk[0],
+                                                  OtgInput.max_velocity[1]*0.01 / OtgInput.max_jerk[1],
+                                                  OtgInput.max_velocity[2]*0.01 / OtgInput.max_jerk[2] }));
+    const double TimeScale2 = TimeScale * TimeScale;
+    const double TimeScale3 = TimeScale2 * TimeScale;
+
+    for (int32_t i = 0; i < DOFs; ++i)
+    {
+        // activate dof
+        OtgInput.enabled[i] = true;
+
+        // kinematic bounds
+        OtgInput.max_velocity[i] = (OtgInput.max_velocity[i] * TimeScale) / PosScale;
+        OtgInput.max_acceleration[i] = (OtgInput.max_acceleration[i] * TimeScale2) / PosScale;
+        OtgInput.max_jerk[i] = (OtgInput.max_jerk[i] * TimeScale3) / PosScale;
+
+        // start state
+        OtgInput.current_position[i] = OtgInput.current_position[i] / PosScale;
+        OtgInput.current_velocity[i] = (OtgInput.current_velocity[i] * TimeScale) / PosScale;
+        OtgInput.current_acceleration[i] = (OtgInput.current_acceleration[i] * TimeScale2) / PosScale;
+
+        // desired target state
+        OtgInput.target_position[i] = OtgInput.target_position[i] / PosScale;
+        OtgInput.target_velocity[i] = (OtgInput.target_velocity[i] * TimeScale) / PosScale;
+        OtgInput.target_acceleration[i] = (OtgInput.target_acceleration[i] * TimeScale2) / PosScale;
+    }
+}
+
+#define DOCTEST_VALUE_PARAMETERIZED_DATA(data, data_container)                                  \
+    static size_t _doctest_subcase_idx = 0;                                                     \
+    std::for_each(data_container.begin(), data_container.end(), [&](const auto& in) {           \
+        DOCTEST_SUBCASE((std::string(#data_container "[") +                                     \
+                        std::to_string(_doctest_subcase_idx++) + "]").c_str()) { data = in; }   \
+    });                                                                                         \
+    _doctest_subcase_idx = 0
+
+TEST_CASE("random_scaling_test" * doctest::description("Random input with 3 DoF and target velocity, acceleration")) {
+    constexpr size_t DOFs {3};
+    Ruckig<DOFs, false, false> otg;
+    InputParameter<DOFs> input;
+
+    std::uniform_real_distribution<double> pos {-5'000, 5'000.0};
+    std::uniform_real_distribution<double> vel {-20'000, 20'000.0};
+    std::uniform_real_distribution<double> acc {-90'000'000, 90'000'000};
+    std::uniform_real_distribution<double> jrk {-1'000'000'000'000, 1'000'000'000'000};
+                                                  
+    Randomizer<DOFs, decltype(pos)> p { pos, seed + 1 };
+    Randomizer<DOFs, decltype(vel)> v { vel, seed + 2 };
+    Randomizer<DOFs, decltype(acc)> a { acc, seed + 3 };
+    Randomizer<DOFs, decltype(jrk)> j { jrk, seed + 4 };
+
+    const uint32_t nTraj = 10'000;
+
+    std::vector<InputParameter<DOFs>> inputDataContainer;
+    for (int32_t i = 0; i < nTraj; ++i) 
+    {
+        p.fill(input.current_position);
+        v.fill(input.current_velocity);
+        a.fill(input.current_acceleration);
+        p.fill(input.target_position);
+        v.fill(input.target_velocity);
+        a.fill(input.target_acceleration);
+        
+        v.fill_abs_equal(input.max_velocity);
+        a.fill_abs_equal(input.max_acceleration);
+        j.fill_abs_equal(input.max_jerk);
+
+        scaleInput_j1(input);
+        input = setFinalAccPhaseIfNecessary(input);
+
+        if (!otg.validate_input(input)) {
+            --i;
+            continue;
+        }
+
+        inputDataContainer.push_back(input);
+    }
+
+    DOCTEST_VALUE_PARAMETERIZED_DATA(input, inputDataContainer);
+
+    CAPTURE( input );
+    Trajectory<3> traj;
+    auto result = otg.calculate(input, traj);
+    CHECK_MESSAGE( ((result == Result::Working) || (result == Result::Finished)), "RuckigResult = ", result, " Duration = ", traj.get_duration());
+}
+
 
 #ifdef WITH_REFLEXXES
 TEST_CASE("comparison_1" * doctest::description("Comparison with Reflexxes with 1 DoF")) {

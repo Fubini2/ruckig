@@ -37,6 +37,13 @@ public:
         }
     }
 
+    void fill_abs_equal(Vector<double>& input) {
+        const double genValue = dist(gen);
+        for (size_t dof = 0; dof < input.size(); ++dof) {
+            input[dof] = std::abs(genValue);
+        }
+    }
+
     void fill_min(Vector<double>& input, const Vector<double>& offset) {
         for (size_t dof = 0; dof < input.size(); ++dof) {
             input[dof] = dist(gen) - std::abs(offset[dof]);
