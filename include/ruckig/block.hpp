@@ -34,7 +34,7 @@ class Block {
 
     void set_min_profile(const Profile& profile) {
         p_min = profile;
-        t_min = p_min.t_sum[6] + p_min.brake.duration;
+        t_min = p_min.t_sum[6] + p_min.brake.duration  + p_min.accel.duration;
         a = std::nullopt;
         b = std::nullopt;
     }

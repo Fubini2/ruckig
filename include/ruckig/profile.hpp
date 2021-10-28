@@ -41,11 +41,8 @@ public:
     //! Brake sub-profile
     BrakeProfile brake;
 
-    //! Total time of the acceleration segments
-    std::optional<double> t_accel;
-
-    //! Allow up to two segments of acceleration before profile ends
-    std::array<double, 2> t_accels, j_accels, a_accels, v_accels, p_accels;
+    //! Acceleration sub-profile
+    BrakeProfile accel;
 
     // For velocity interface
     template<JerkSigns jerk_signs, Limits limits>
@@ -148,8 +145,8 @@ public:
             j = {jf, 0, -jf, 0, jf, 0, -jf};
         }
 
-        const double vUppLim = ((vMax > 0) ? vMax : vMin) + 1e-10;
-        const double vLowLim = ((vMax > 0) ? vMin : vMax) - 1e-10;
+        const double vUppLim = ((vMax > 0) ? vMax : vMin) + 1e-12;
+        const double vLowLim = ((vMax > 0) ? vMin : vMax) - 1e-12;
 
         for (size_t i = 0; i < 7; ++i) {
             a[i+1] = a[i] + t[i] * j[i];
@@ -196,7 +193,7 @@ public:
 
         // Velocity limit can be broken in the beginning if both initial velocity and acceleration are too high
         // std::cout << std::setprecision(16) << "target: " << std::abs(p[7]-pf) << " " << std::abs(v[7] - vf) << " " << std::abs(a[7] - af) << " T: " << t_sum[6] << " " << to_string() << std::endl;
-        bool Result = std::abs(p[7] - pf) < 1e-4 && std::abs(v[7] - vf) < 1e-8 && std::abs(a[7] - af) < 1e-10
+        bool Result = std::abs(p[7] - pf) < 1e-8 && std::abs(v[7] - vf) < 1e-8 && std::abs(a[7] - af) < 1e-10
             && a[1] >= aLowLim && a[3] >= aLowLim && a[5] >= aLowLim
             && a[1] <= aUppLim && a[3] <= aUppLim && a[5] <= aUppLim
             && v[3] <= vUppLim && v[4] <= vUppLim 
@@ -204,7 +201,7 @@ public:
 
         // Velocity limit can be broken in the beginning of the acceleration phase if both final velocity and acceleration 
         // are too high. Therefore in case of a final acceleration phase allow slight violations of some velocity limits.
-        if (   (t_accel > 1e-12) 
+        if (   (accel.duration > 1e-12) 
             && (   ((vf > 0) ? (vf > vMax) : (vf < vMin)) 
                 || ((af > 0) ? (af > aMax) : (af < aMin))))
         {
@@ -308,12 +305,12 @@ public:
             }
         }
 
-        if (t_accel) {
-            if (t_accels[0] > 0.0) {
-                check_step_for_position_extremum(0.0, -t_accels[0], p_accels[0], v_accels[0], a_accels[0], j_accels[0], extrema);
+        if (accel.duration) {
+            if (accel.t[0] > 0.0) {
+                check_step_for_position_extremum(0.0, -accel.t[0], accel.p[0], accel.v[0], accel.a[0], accel.j[0], extrema);
 
-                if (t_accels[1] > 0.0) {
-                    check_step_for_position_extremum(-t_accels[0], -t_accels[1], p_accels[1], v_accels[1], a_accels[1], j_accels[1], extrema);
+                if (accel.t[1] > 0.0) {
+                    check_step_for_position_extremum(-accel.t[0], -accel.t[1], accel.p[1], accel.v[1], accel.a[1], accel.j[1], extrema);
                 }
             }
         }
