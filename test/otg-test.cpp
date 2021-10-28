@@ -927,10 +927,10 @@ TEST_CASE("random_3" * doctest::description("Random input with 3 DoF and target 
 static const double EPS_1E_12 = 1e-12;
 
 template<size_t DOFs>
-static ruckig::InputParameter<DOFs> setFinalAccPhaseIfNecessary(const ruckig::InputParameter<DOFs>& Input)
+static ruckig::InputParameter<DOFs> setFinalAccPhaseIfNecessary(const ruckig::InputParameter<DOFs> Input)
 {
     ruckig::InputParameter<DOFs> Output = Input;
-    
+
     Output.final_acceleration_phase = false;
     for (uint32_t i = 0; i < Output.degrees_of_freedom; ++i)
     {
@@ -954,111 +954,85 @@ static ruckig::InputParameter<DOFs> setFinalAccPhaseIfNecessary(const ruckig::In
         if (std::abs(Output.target_acceleration[i]) > max_target_acceleration)
         {
             Output.final_acceleration_phase = true;
-            Output.target_acceleration[i] = std::clamp(Output.target_acceleration[i], -max_target_acceleration + EPS_1E_12, max_target_acceleration - EPS_1E_12);
+            Output.target_acceleration[i] = std::clamp(Input.target_acceleration[i], -max_target_acceleration + EPS_1E_12, max_target_acceleration - EPS_1E_12);
         }
     }
     return Output;
 }
 
 template<size_t DOFs>
-void scaleInput_j1(ruckig::InputParameter<DOFs>& OtgInput)
+ruckig::InputParameter<DOFs> scaleInput_jx(ruckig::InputParameter<DOFs> OtgInput, const double desiredJerk)
 {
-    // Scale that maximal jerk gets 1.0
-    const double TimeScale = std::cbrt(std::max({ OtgInput.max_jerk[0], OtgInput.max_jerk[1], OtgInput.max_jerk[2] }));
+    ruckig::InputParameter<DOFs> Output = OtgInput;
+
+    // Scale that maximal jerk gets desiredJerk
+    const double TimeScale = std::cbrt(std::max({ Output.max_jerk[0] * (1.0 / desiredJerk),
+                                                    Output.max_jerk[1] * (1.0 / desiredJerk),
+                                                    Output.max_jerk[2] * (1.0 / desiredJerk) }));
     const double TimeScale2 = TimeScale * TimeScale;
     const double TimeScale3 = TimeScale2 * TimeScale;
 
     for (int32_t i = 0; i < DOFs; ++i)
     {
         // activate dof
-        OtgInput.enabled[i] = true;
+        Output.enabled[i] = true;
 
         // kinematic bounds
-        OtgInput.max_velocity[i] = OtgInput.max_velocity[i] / TimeScale;
-        OtgInput.max_acceleration[i] = OtgInput.max_acceleration[i] / TimeScale2;
-        OtgInput.max_jerk[i] = OtgInput.max_jerk[i] / TimeScale3;
+        Output.max_velocity[i] = Output.max_velocity[i] / TimeScale;
+        Output.max_acceleration[i] = Output.max_acceleration[i] / TimeScale2;
+        Output.max_jerk[i] = Output.max_jerk[i] / TimeScale3;
 
         // start state
-        OtgInput.current_position[i] = OtgInput.current_position[i];
-        OtgInput.current_velocity[i] = OtgInput.current_velocity[i] / TimeScale;
-        OtgInput.current_acceleration[i] = OtgInput.current_acceleration[i] / TimeScale2;
+        Output.current_position[i] = Output.current_position[i];
+        Output.current_velocity[i] = Output.current_velocity[i] / TimeScale;
+        Output.current_acceleration[i] = Output.current_acceleration[i] / TimeScale2;
 
         // desired target state
-        OtgInput.target_position[i] = OtgInput.target_position[i];
-        OtgInput.target_velocity[i] = OtgInput.target_velocity[i] / TimeScale;
-        OtgInput.target_acceleration[i] = OtgInput.target_acceleration[i] / TimeScale2;
+        Output.target_position[i] = Output.target_position[i];
+        Output.target_velocity[i] = Output.target_velocity[i] / TimeScale;
+        Output.target_acceleration[i] = Output.target_acceleration[i] / TimeScale2;
     }
+    return Output;
 }
 
 template<size_t DOFs>
-void scaleInput_v1_j1(ruckig::InputParameter<DOFs>& OtgInput)
+static ruckig::InputParameter<DOFs> scaleInput_vx_jx(ruckig::InputParameter<DOFs> OtgInput, const double desiredVel, const double desiredJerk)
 {
-    // Scale that maximal velocity and jerk both get value 1.0
-    const double PosScale = std::sqrt(std::max({ std::pow(OtgInput.max_velocity[0], 3) / OtgInput.max_jerk[0],
-                                                 std::pow(OtgInput.max_velocity[1], 3) / OtgInput.max_jerk[1],
-                                                 std::pow(OtgInput.max_velocity[2], 3) / OtgInput.max_jerk[2] }));
-    const double TimeScale = std::sqrt(std::max({ OtgInput.max_velocity[0] / OtgInput.max_jerk[0],
-                                                  OtgInput.max_velocity[1] / OtgInput.max_jerk[1],
-                                                  OtgInput.max_velocity[2] / OtgInput.max_jerk[2] }));
+    ruckig::InputParameter<DOFs> Output = OtgInput;
+
+    // Scale that maximal velocity gets desiredVel and maximal jerk gets desiredJerk
+    const double PosScale = std::sqrt(std::max({ (std::pow(Output.max_velocity[0] / desiredVel, 3) * desiredJerk) / Output.max_jerk[0],
+                                                    (std::pow(Output.max_velocity[1] / desiredVel, 3) * desiredJerk) / Output.max_jerk[1],
+                                                    (std::pow(Output.max_velocity[2] / desiredVel, 3) * desiredJerk) / Output.max_jerk[2] }));
+    const double TimeScale = std::sqrt(std::max({ (Output.max_velocity[0] * desiredJerk) / (Output.max_jerk[0] * desiredVel),
+                                                    (Output.max_velocity[1] * desiredJerk) / (Output.max_jerk[1] * desiredVel),
+                                                    (Output.max_velocity[2] * desiredJerk) / (Output.max_jerk[2] * desiredVel) }));
     const double TimeScale2 = TimeScale * TimeScale;
     const double TimeScale3 = TimeScale2 * TimeScale;
 
     for (int32_t i = 0; i < DOFs; ++i)
     {
         // activate dof
-        OtgInput.enabled[i] = true;
+        Output.enabled[i] = true;
 
         // kinematic bounds
-        OtgInput.max_velocity[i] = (OtgInput.max_velocity[i] * TimeScale) / PosScale;
-        OtgInput.max_acceleration[i] = (OtgInput.max_acceleration[i] * TimeScale2) / PosScale;
-        OtgInput.max_jerk[i] = (OtgInput.max_jerk[i] * TimeScale3) / PosScale;
+        Output.max_velocity[i] = (Output.max_velocity[i] * TimeScale) / PosScale;
+        Output.max_acceleration[i] = (Output.max_acceleration[i] * TimeScale2) / PosScale;
+        Output.max_jerk[i] = (Output.max_jerk[i] * TimeScale3) / PosScale;
 
         // start state
-        OtgInput.current_position[i] = OtgInput.current_position[i] / PosScale;
-        OtgInput.current_velocity[i] = (OtgInput.current_velocity[i] * TimeScale) / PosScale;
-        OtgInput.current_acceleration[i] = (OtgInput.current_acceleration[i] * TimeScale2) / PosScale;
+        Output.current_position[i] = Output.current_position[i] / PosScale;
+        Output.current_velocity[i] = (Output.current_velocity[i] * TimeScale) / PosScale;
+        Output.current_acceleration[i] = (Output.current_acceleration[i] * TimeScale2) / PosScale;
 
         // desired target state
-        OtgInput.target_position[i] = OtgInput.target_position[i] / PosScale;
-        OtgInput.target_velocity[i] = (OtgInput.target_velocity[i] * TimeScale) / PosScale;
-        OtgInput.target_acceleration[i] = (OtgInput.target_acceleration[i] * TimeScale2) / PosScale;
+        Output.target_position[i] = Output.target_position[i] / PosScale;
+        Output.target_velocity[i] = (Output.target_velocity[i] * TimeScale) / PosScale;
+        Output.target_acceleration[i] = (Output.target_acceleration[i] * TimeScale2) / PosScale;
     }
+    return Output;
 }
 
-template<size_t DOFs>
-void scaleInput_v100_j1(ruckig::InputParameter<DOFs>& OtgInput)
-{
-    // Scale that maximal velocity and jerk both get value 1.0
-    const double PosScale = std::sqrt(std::max({ std::pow(OtgInput.max_velocity[0]*0.01, 3) / OtgInput.max_jerk[0],
-                                                 std::pow(OtgInput.max_velocity[1]*0.01, 3) / OtgInput.max_jerk[1],
-                                                 std::pow(OtgInput.max_velocity[2]*0.01, 3) / OtgInput.max_jerk[2] }));
-    const double TimeScale = std::sqrt(std::max({ OtgInput.max_velocity[0]*0.01 / OtgInput.max_jerk[0],
-                                                  OtgInput.max_velocity[1]*0.01 / OtgInput.max_jerk[1],
-                                                  OtgInput.max_velocity[2]*0.01 / OtgInput.max_jerk[2] }));
-    const double TimeScale2 = TimeScale * TimeScale;
-    const double TimeScale3 = TimeScale2 * TimeScale;
-
-    for (int32_t i = 0; i < DOFs; ++i)
-    {
-        // activate dof
-        OtgInput.enabled[i] = true;
-
-        // kinematic bounds
-        OtgInput.max_velocity[i] = (OtgInput.max_velocity[i] * TimeScale) / PosScale;
-        OtgInput.max_acceleration[i] = (OtgInput.max_acceleration[i] * TimeScale2) / PosScale;
-        OtgInput.max_jerk[i] = (OtgInput.max_jerk[i] * TimeScale3) / PosScale;
-
-        // start state
-        OtgInput.current_position[i] = OtgInput.current_position[i] / PosScale;
-        OtgInput.current_velocity[i] = (OtgInput.current_velocity[i] * TimeScale) / PosScale;
-        OtgInput.current_acceleration[i] = (OtgInput.current_acceleration[i] * TimeScale2) / PosScale;
-
-        // desired target state
-        OtgInput.target_position[i] = OtgInput.target_position[i] / PosScale;
-        OtgInput.target_velocity[i] = (OtgInput.target_velocity[i] * TimeScale) / PosScale;
-        OtgInput.target_acceleration[i] = (OtgInput.target_acceleration[i] * TimeScale2) / PosScale;
-    }
-}
 
 #define DOCTEST_VALUE_PARAMETERIZED_DATA(data, data_container)                                  \
     static size_t _doctest_subcase_idx = 0;                                                     \
@@ -1099,7 +1073,7 @@ TEST_CASE("random_scaling_test" * doctest::description("Random input with 3 DoF 
         a.fill_abs_equal(input.max_acceleration);
         j.fill_abs_equal(input.max_jerk);
 
-        scaleInput_j1(input);
+        input = scaleInput_jx(input, 100.0);
         input = setFinalAccPhaseIfNecessary(input);
 
         if (!otg.validate_input(input)) {
