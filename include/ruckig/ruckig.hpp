@@ -171,7 +171,7 @@ public:
 
     //! Validate the input as well as the Ruckig instance for trajectory calculation
     template<bool throw_validation_error = true>
-    bool validate_input(const InputParameter<DOFs, CustomVector>& input, bool check_current_state_within_limits = false, bool check_target_state_within_limits = true) const {
+    bool validate_input(const InputParameter<DOFs, CustomVector>& input, bool check_current_state_within_limits=false, bool check_target_state_within_limits=false) const {
         if (!input.template validate<throw_validation_error>(check_current_state_within_limits, check_target_state_within_limits)) {
             return false;
         }
@@ -203,7 +203,7 @@ public:
 
     //! Calculate a new trajectory for the given input and check for interruption
     Result calculate(const InputParameter<DOFs, CustomVector>& input, Trajectory<DOFs, CustomVector>& trajectory, bool& was_interrupted) {
-        if (!validate_input<throw_error>(input, false, true)) {
+        if (!validate_input<throw_error>(input, false, false)) {
             return Result::ErrorInvalidInput;
         }
 

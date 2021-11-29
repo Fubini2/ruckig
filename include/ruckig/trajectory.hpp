@@ -31,13 +31,13 @@ class Trajectory {
 
     Container<Vector<Profile>> profiles;
 
-    double duration {0.0};
+    double duration{ 0.0 };
     Container<double> cumulative_times;
 
     Vector<double> independent_min_durations;
     Vector<Bound> position_extrema;
 
-    size_t continue_calculation_counter {0};
+    size_t continue_calculation_counter{ 0 };
 
 #if defined WITH_CLOUD_CLIENT
     template<size_t D = DOFs, typename std::enable_if<(D >= 1), int>::type = 0>
@@ -50,7 +50,7 @@ class Trajectory {
     void resize(size_t max_number_of_waypoints) {
         resize<1>(max_number_of_waypoints); // Also call resize method above
 
-        for (auto& p: profiles) {
+        for (auto& p : profiles) {
             p.resize(degrees_of_freedom);
         }
     }
@@ -59,20 +59,11 @@ class Trajectory {
     //! Calculates the base values to then integrate from
     using SetIntegrate = std::function<void(size_t, double, double, double, double, double)>;
     void state_to_integrate_from(double time, size_t& new_section, const SetIntegrate& set_integrate) const {
-        if (time >= duration) {
-            // Keep constant acceleration
-            new_section = profiles.size();
-            const auto& profiles_dof = profiles.back();
-            for (size_t dof = 0; dof < degrees_of_freedom; ++dof) {
-                const double t_pre = (profiles.size() > 1) ? cumulative_times[cumulative_times.size() - 2] : profiles_dof[dof].brake.duration;
-                const double t_diff = time - (t_pre + profiles_dof[dof].t_sum.back());
-                set_integrate(dof, t_diff, profiles_dof[dof].p.back(), profiles_dof[dof].v.back(), profiles_dof[dof].a.back(), 0.0);
-            }
-            return;
-        }
-
+        // TODO[Fubini2]: this does not work correctly. For now only quick hack for our use case: always use 0 here. The rest is probably only necessary for pro version.
         const auto new_section_ptr = std::upper_bound(cumulative_times.begin(), cumulative_times.end(), time);
         new_section = std::distance(cumulative_times.begin(), new_section_ptr);
+        new_section = 0;
+
         double t_diff = time;
         if (new_section > 0) {
             t_diff -= cumulative_times[new_section - 1];
@@ -81,6 +72,22 @@ class Trajectory {
         for (size_t dof = 0; dof < degrees_of_freedom; ++dof) {
             const Profile& p = profiles[new_section][dof];
             double t_diff_dof = t_diff;
+
+            // Accelaration post-trajectory
+            if (time > duration - p.accel.duration) {
+                t_diff_dof = duration - time;
+                if (t_diff_dof <= p.accel.duration) {
+                    const size_t index = (t_diff_dof > p.accel.t[0]) ? 1 : 0;
+                    if (index > 0) {
+                        t_diff_dof -= p.accel.t[index - 1];
+                    }
+
+                    set_integrate(dof, (-1.0) * t_diff_dof, p.accel.p[index], p.accel.v[index], p.accel.a[index], p.accel.j[index]);
+                    continue;
+                } else {
+                    throw std::runtime_error("Get outta here");
+                }
+            }
 
             // Brake pre-trajectory
             if (new_section == 0 && p.brake.duration > 0) {
@@ -142,14 +149,14 @@ public:
     size_t degrees_of_freedom;
 
     template<size_t D = DOFs, typename std::enable_if<(D >= 1), int>::type = 0>
-    Trajectory(): degrees_of_freedom(DOFs) {
+    Trajectory() : degrees_of_freedom(DOFs) {
 #if defined WITH_CLOUD_CLIENT
         resize(0);
 #endif
     }
 
     template<size_t D = DOFs, typename std::enable_if<(D == 0), int>::type = 0>
-    Trajectory(size_t dofs): degrees_of_freedom(dofs) {
+    Trajectory(size_t dofs) : degrees_of_freedom(dofs) {
 #if defined WITH_CLOUD_CLIENT
         resize(0);
 #endif
@@ -161,12 +168,12 @@ public:
 
 #if defined WITH_CLOUD_CLIENT
     template<size_t D = DOFs, typename std::enable_if<(D >= 1), int>::type = 0>
-    Trajectory(size_t max_number_of_waypoints): degrees_of_freedom(DOFs) {
+    Trajectory(size_t max_number_of_waypoints) : degrees_of_freedom(DOFs) {
         resize(max_number_of_waypoints);
     }
 
     template<size_t D = DOFs, typename std::enable_if<(D == 0), int>::type = 0>
-    Trajectory(size_t dofs, size_t max_number_of_waypoints): degrees_of_freedom(dofs) {
+    Trajectory(size_t dofs, size_t max_number_of_waypoints) : degrees_of_freedom(dofs) {
         resize(max_number_of_waypoints);
 
         independent_min_durations.resize(dofs);

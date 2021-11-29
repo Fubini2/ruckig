@@ -1,17 +1,19 @@
+#include <cfloat>
+
 #include <ruckig/block.hpp>
 #include <ruckig/position.hpp>
 
 
 namespace ruckig {
 
-PositionSecondOrderStep1::PositionSecondOrderStep1(double p0, double v0, double pf, double vf, double vMax, double vMin, double aMax, double aMin): v0(v0), vf(vf), _vMax(vMax), _vMin(vMin), _aMax(aMax), _aMin(aMin) {
+PositionSecondOrderStep1::PositionSecondOrderStep1(double p0, double v0, double pf, double vf, double vMax, double vMin, double aMax, double aMin) : v0(v0), vf(vf), _vMax(vMax), _vMin(vMin), _aMax(aMax), _aMin(aMin) {
     pd = pf - p0;
 }
 
 void PositionSecondOrderStep1::time_acc0(ProfileIter& profile, double vMax, double vMin, double aMax, double aMin, bool) const {
-    profile->t[0] = (-v0 + vMax)/aMax;
-    profile->t[1] = (aMin*v0*v0 - aMax*vf*vf)/(2*aMax*aMin*vMax) + vMax*(aMax - aMin)/(2*aMax*aMin) + pd/vMax;
-    profile->t[2] = (vf - vMax)/aMin;
+    profile->t[0] = (-v0 + vMax) / aMax;
+    profile->t[1] = (aMin * v0 * v0 - aMax * vf * vf) / (2 * aMax * aMin * vMax) + vMax * (aMax - aMin) / (2 * aMax * aMin) + pd / vMax;
+    profile->t[2] = (vf - vMax) / aMin;
     profile->t[3] = 0;
     profile->t[4] = 0;
     profile->t[5] = 0;
@@ -23,15 +25,15 @@ void PositionSecondOrderStep1::time_acc0(ProfileIter& profile, double vMax, doub
 }
 
 void PositionSecondOrderStep1::time_none(ProfileIter& profile, double vMax, double vMin, double aMax, double aMin, bool return_after_found) const {
-    double h1 = (aMax*vf*vf - aMin*v0*v0 - 2*aMax*aMin*pd)/(aMax - aMin);
+    double h1 = (aMax * vf * vf - aMin * v0 * v0 - 2 * aMax * aMin * pd) / (aMax - aMin);
     if (h1 >= 0.0) {
         h1 = std::sqrt(h1);
 
         // Solution 1
         {
-            profile->t[0] = -(v0 + h1)/aMax;
+            profile->t[0] = -(v0 + h1) / aMax;
             profile->t[1] = 0;
-            profile->t[2] = (vf + h1)/aMin;
+            profile->t[2] = (vf + h1) / aMin;
             profile->t[3] = 0;
             profile->t[4] = 0;
             profile->t[5] = 0;
@@ -47,9 +49,9 @@ void PositionSecondOrderStep1::time_none(ProfileIter& profile, double vMax, doub
 
         // Solution 2
         {
-            profile->t[0] = (-v0 + h1)/aMax;
+            profile->t[0] = (-v0 + h1) / aMax;
             profile->t[1] = 0;
-            profile->t[2] = (vf - h1)/aMin;
+            profile->t[2] = (vf - h1) / aMin;
             profile->t[3] = 0;
             profile->t[4] = 0;
             profile->t[5] = 0;

@@ -85,7 +85,7 @@ class PositionThirdOrderStep2 {
     bool time_none_smooth(Profile& profile, double vMax, double vMin, double aMax, double aMin, double jMax);
 
 public:
-    bool minimize_jerk {false};
+    bool minimize_jerk{ false };
 
     explicit PositionThirdOrderStep2(double tf, double p0, double v0, double a0, double pf, double vf, double af, double vMax, double vMin, double aMax, double aMin, double jMax);
 

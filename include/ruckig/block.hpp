@@ -5,6 +5,9 @@
 #include <numeric>
 #include <optional>
 #include <string>
+#if defined(RUCKIG_FILE_OUTPUT)
+    #include <sstream>
+#endif
 
 #include <ruckig/profile.hpp>
 
@@ -24,9 +27,9 @@ class Block {
 public:
     struct Interval {
         double left, right; // [s]
-        Profile profile; // Profile corresponding to right (end) time
+        Profile profile;    // Profile corresponding to right (end) time
 
-        explicit Interval(double left, double right): left(left), right(right) { }
+        explicit Interval(double left, double right) : left(left), right(right) {}
 
         explicit Interval(const Profile& profile_left, const Profile& profile_right) {
             const double left_duration = profile_left.t_sum.back() + profile_left.brake.duration + profile_left.accel.duration;
@@ -51,17 +54,33 @@ public:
     }
 
     Profile p_min; // Save min profile so that it doesn't need to be recalculated in Step2
-    double t_min; // [s]
+    double t_min;  // [s]
 
     // Max. 2 intervals can be blocked: called a and b with corresponding profiles, order does not matter
     std::optional<Interval> a, b;
 
+    static bool copmareTwoProfilesForEquality(Profile A, Profile B) {
+        constexpr double epsRel = 0.001;
+        constexpr double epsAbs = 1e-4;
+
+        for (size_t idx = 0; idx < 6; ++idx) {
+            if (std::abs((B.t[idx] - A.t[idx]) / std::max(DBL_EPSILON, A.t[idx])) > epsRel) {
+                if (std::abs(B.t[idx] - A.t[idx]) > epsAbs) {
+                    return false;
+                }
+            }
+        }
+    }
+
     template<size_t N, bool numerical_robust = true>
     static bool calculate_block(Block& block, std::array<Profile, N>& valid_profiles, size_t valid_profile_counter) {
-        // std::cout << "---\n " << valid_profile_counter << std::endl;
-        // for (size_t i = 0; i < valid_profile_counter; ++i) {
-        //     std::cout << valid_profiles[i].t_sum.back() << " " << valid_profiles[i].to_string() << std::endl;
-        // }
+#if defined(RUCKIG_FILE_OUTPUT)
+        for (size_t i = 0; i < valid_profile_counter; ++i) {
+            std::cout << "---- Profile " << i << " ----" << std::endl
+                      << "t_sum: " << to_string_with_precision<double>(valid_profiles[i].t_sum.back()) << std::endl
+                      << valid_profiles[i].to_string() << std::endl;
+        }
+#endif
 
         if (valid_profile_counter == 1) {
             block.set_min_profile(valid_profiles[0]);
@@ -82,17 +101,36 @@ public:
                 return true;
             }
 
-        // Only happens due to numerical issues
+            // Only happens due to numerical issues
         } else if (valid_profile_counter == 4) {
             // Find "identical" profiles
-            if (std::abs(valid_profiles[0].t_sum.back() - valid_profiles[1].t_sum.back()) < 32 * std::numeric_limits<double>::epsilon() && valid_profiles[0].direction != valid_profiles[1].direction) {
+            if (std::abs(valid_profiles[0].t_sum.back() - valid_profiles[1].t_sum.back()) < 32 * std::numeric_limits<float>::epsilon() && valid_profiles[0].direction != valid_profiles[1].direction) {
                 remove_profile<N>(valid_profiles, valid_profile_counter, 1);
-            } else if (std::abs(valid_profiles[2].t_sum.back() - valid_profiles[3].t_sum.back()) < 256 * std::numeric_limits<double>::epsilon() && valid_profiles[2].direction != valid_profiles[3].direction) {
+            } else if (std::abs(valid_profiles[1].t_sum.back() - valid_profiles[2].t_sum.back()) < 256 * std::numeric_limits<float>::epsilon() && valid_profiles[1].direction != valid_profiles[2].direction) {
+                remove_profile<N>(valid_profiles, valid_profile_counter, 1);
+            } else if (std::abs(valid_profiles[2].t_sum.back() - valid_profiles[3].t_sum.back()) < 256 * std::numeric_limits<float>::epsilon() && valid_profiles[2].direction != valid_profiles[3].direction) {
                 remove_profile<N>(valid_profiles, valid_profile_counter, 3);
-            } else if (std::abs(valid_profiles[0].t_sum.back() - valid_profiles[3].t_sum.back()) < 256 * std::numeric_limits<double>::epsilon() && valid_profiles[0].direction != valid_profiles[3].direction) {
+            } else if (std::abs(valid_profiles[0].t_sum.back() - valid_profiles[3].t_sum.back()) < 256 * std::numeric_limits<float>::epsilon() && valid_profiles[0].direction != valid_profiles[3].direction) {
                 remove_profile<N>(valid_profiles, valid_profile_counter, 3);
             } else {
-                return false;
+                size_t identical_profiles_removed_counter = 0;
+                for (size_t idx = 0; idx < valid_profile_counter; ++idx) {
+                    for (size_t jdx = 1; jdx < valid_profile_counter; ++jdx) {
+                        if (idx == jdx) {
+                            continue;
+                        }
+
+                        if (copmareTwoProfilesForEquality(valid_profiles[idx], valid_profiles[jdx])) {
+                            remove_profile<N>(valid_profiles, valid_profile_counter, jdx);
+                            ++identical_profiles_removed_counter;
+                            --jdx;
+                        }
+                    }
+                }
+
+                if (identical_profiles_removed_counter == 0) {
+                    return false;
+                }
             }
 
         } else if (valid_profile_counter % 2 == 0) {
@@ -105,7 +143,9 @@ public:
 
         block.set_min_profile(valid_profiles[idx_min]);
 
-        if (valid_profile_counter == 3) {
+        if (valid_profile_counter == 1) {
+            return true;
+        } else if (valid_profile_counter == 3) {
             const size_t idx_else_1 = (idx_min + 1) % 3;
             const size_t idx_else_2 = (idx_min + 2) % 3;
 
@@ -146,14 +186,15 @@ public:
     }
 
     std::string to_string() const {
-        std::string result = "[" + std::to_string(t_min) + " ";
+        std::string result = "Blocks:\n";
+        result += "t_min: [" + to_string_with_precision<double>(t_min) + "]\n";
         if (a) {
-            result += std::to_string(a->left) + "] [" + std::to_string(a->right) + " ";
+            result += "a: [" + to_string_with_precision<double>(a->left) + "," + to_string_with_precision<double>(a->right) + "]\n";
         }
         if (b) {
-            result += std::to_string(b->left) + "] [" + std::to_string(b->right) + " ";
+            result += "b: [" + to_string_with_precision<double>(b->left) + "," + to_string_with_precision<double>(b->right) + "]\n";
         }
-        return result + "-";
+        return result;
     }
 };
 

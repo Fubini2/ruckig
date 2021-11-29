@@ -7,6 +7,7 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <cfloat>
 
 #include <ruckig/brake.hpp>
 #include <ruckig/roots.hpp>
@@ -29,20 +30,24 @@ struct Bound {
 //!
 //! The class members are only available in the Ruckig Community Version.
 class Profile {
-    constexpr static double v_eps {1e-12};
-    constexpr static double a_eps {1e-12};
-    constexpr static double j_eps {1e-12};
+    // Used to check against state bounds at the switching points
+    constexpr static double v_eps{ 1e-12 };
+    constexpr static double a_eps{ 1e-12 };
+    constexpr static double j_eps{ 1e-12 };
 
-    constexpr static double p_precision {1e-8};
-    constexpr static double v_precision {1e-8};
-    constexpr static double a_precision {1e-10};
-    constexpr static double t_precision {1e-12};
+    // Used to check the reached target state
+    constexpr static double p_precision{ 1e-8 };
+    constexpr static double v_precision{ 1e-7 };
+    constexpr static double a_precision{ 1.2e-5 };
 
-    constexpr static double t_max {1e12};
+    constexpr static double t_precision{ 1e-12 };
+    constexpr static double t_precision_step2{ 1e-9 };
+
+    constexpr static double t_max{ 1e12 };
 
 public:
-    std::array<double, 7> t, t_sum, j;
-    std::array<double, 8> a, v, p;
+    std::array<double, 7> t{}, t_sum{}, j{};
+    std::array<double, 8> a{}, v{}, p{};
 
     //! Brake sub-profiles
     BrakeProfile brake, accel;
@@ -50,10 +55,88 @@ public:
     //! Target (final) kinematic state
     double pf, vf, af;
 
-    enum class ReachedLimits { ACC0_ACC1_VEL, VEL, ACC0, ACC1, ACC0_ACC1, ACC0_VEL, ACC1_VEL, NONE } limits;
-    enum class Direction { UP, DOWN } direction;
-    enum class ControlSigns { UDDU, UDUD } control_signs;
+    enum class ReachedLimits { ACC0_ACC1_VEL,
+                               VEL,
+                               ACC0,
+                               ACC1,
+                               ACC0_ACC1,
+                               ACC0_VEL,
+                               ACC1_VEL,
+                               NONE } limits;
+    enum class Direction { UP,
+                           DOWN } direction;
+    enum class ControlSigns { UDDU,
+                              UDUD } control_signs;
 
+
+    static constexpr inline int64_t ulpsDistance(double a, double b) {
+        // Save work if the doubles are equal.
+        // Also handles +0 == -0
+        if (a == b) {
+            return 0;
+        }
+
+        // Max distance for NaN and inf
+        if (std::isnan(a) || std::isnan(b) || std::isinf(a) || std::isinf(b)) {
+            return std::numeric_limits<int64_t>::max();
+        }
+
+        const auto ia = std::bit_cast<int64_t>(a);
+        const auto ib = std::bit_cast<int64_t>(b);
+
+        // Don't compare differently-signed floats.
+        if ((ia < 0) != (ib < 0)) {
+            return std::numeric_limits<int64_t>::max();
+        }
+
+        // Return the absolute value of the distance in ULPs.
+        const int64_t distance = ia - ib;
+        return distance > 0 ? distance : -distance;
+    }
+
+    static constexpr int64_t UlpsMaxDistPos = 45036000LL; // Distance between 1.0 and 1.0 + 1e-8
+    static constexpr int64_t UlpsMaxDistVel = 45036000LL; // Distance between 1.0 and 1.0 + 1e-8
+    static constexpr int64_t UlpsMaxDistAcc = 45036000LL; // Distance between 1.0 and 1.0 + 1e-8
+
+    static constexpr inline bool ulpsPosCheck(double PosCalc, double PosExpect) {
+        return ulpsDistance(PosCalc, PosExpect) < UlpsMaxDistPos;
+    }
+
+    static constexpr inline bool ulpsVelCheck(double VelCalc, double VelExpect) {
+        return ulpsDistance(VelCalc, VelExpect) < UlpsMaxDistVel;
+    }
+
+    static constexpr inline bool ulpsAccCheck(double AccCalc, double AccExpect) {
+        return ulpsDistance(AccCalc, AccExpect) < UlpsMaxDistAcc;
+    }
+
+    static inline bool robust_pos_check(double PosCalc, double PosExpect) {
+        return std::abs(PosCalc - PosExpect) < p_precision || ulpsPosCheck(PosCalc, PosExpect);
+    }
+
+    static inline bool robust_vel_check(double VelCalc, double VelExpect) {
+        return std::abs(VelCalc - VelExpect) < v_precision || ulpsVelCheck(VelCalc, VelExpect);
+    }
+
+    static inline bool robust_acc_check(double AccCalc, double AccExpect) {
+        return std::abs(AccCalc - AccExpect) < a_precision || ulpsAccCheck(AccCalc, AccExpect);
+    }
+
+    static inline bool robust_upper_vel_limit_check(double VelCalc, double UpperVelLimit) {
+        return VelCalc - UpperVelLimit < v_eps || ulpsVelCheck(VelCalc, UpperVelLimit);
+    }
+
+    static inline bool robust_upper_acc_limit_check(double AccCalc, double UpperAccLimit) {
+        return AccCalc - UpperAccLimit < a_eps || ulpsAccCheck(AccCalc, UpperAccLimit);
+    }
+
+    static inline bool robust_lower_vel_limit_check(double VelCalc, double LowerVelLimit) {
+        return VelCalc - LowerVelLimit > -v_eps || ulpsVelCheck(VelCalc, LowerVelLimit);
+    }
+
+    static inline bool robust_lower_acc_limit_check(double AccCalc, double LowerAccLimit) {
+        return AccCalc - LowerAccLimit > -a_eps || ulpsAccCheck(AccCalc, LowerAccLimit);
+    }
 
     // For third-order velocity interface
     template<ControlSigns control_signs, ReachedLimits limits>
@@ -64,11 +147,11 @@ public:
 
         t_sum[0] = t[0];
         for (size_t i = 0; i < 6; ++i) {
-            if (t[i+1] < 0) {
+            if (t[i + 1] < 0) {
                 return false;
             }
 
-            t_sum[i+1] = t_sum[i] + t[i+1];
+            t_sum[i + 1] = t_sum[i] + t[i + 1];
         }
 
         if constexpr (limits == ReachedLimits::ACC0) {
@@ -82,15 +165,15 @@ public:
         }
 
         if constexpr (control_signs == ControlSigns::UDDU) {
-            j = {(t[0] > 0 ? jf : 0), 0, (t[2] > 0 ? -jf : 0), 0, (t[4] > 0 ? -jf : 0), 0, (t[6] > 0 ? jf : 0)};
+            j = { (t[0] > 0 ? jf : 0), 0, (t[2] > 0 ? -jf : 0), 0, (t[4] > 0 ? -jf : 0), 0, (t[6] > 0 ? jf : 0) };
         } else {
-            j = {(t[0] > 0 ? jf : 0), 0, (t[2] > 0 ? -jf : 0), 0, (t[4] > 0 ? jf : 0), 0, (t[6] > 0 ? -jf : 0)};
+            j = { (t[0] > 0 ? jf : 0), 0, (t[2] > 0 ? -jf : 0), 0, (t[4] > 0 ? jf : 0), 0, (t[6] > 0 ? -jf : 0) };
         }
 
         for (size_t i = 0; i < 7; ++i) {
-            a[i+1] = a[i] + t[i] * j[i];
-            v[i+1] = v[i] + t[i] * (a[i] + t[i] * j[i] / 2);
-            p[i+1] = p[i] + t[i] * (v[i] + t[i] * (a[i] / 2 + t[i] * j[i] / 6));
+            a[i + 1] = a[i] + t[i] * j[i];
+            v[i + 1] = v[i] + t[i] * (a[i] + t[i] * j[i] / 2);
+            p[i + 1] = p[i] + t[i] * (v[i] + t[i] * (a[i] / 2 + t[i] * j[i] / 6));
         }
 
         this->control_signs = control_signs;
@@ -102,9 +185,14 @@ public:
 
         // Velocity limit can be broken in the beginning if both initial velocity and acceleration are too high
         // std::cout << std::setprecision(15) << "target: " << std::abs(p.back() - pf) << " " << std::abs(v.back() - vf) << " " << std::abs(a.back() - af) << " T: " << t_sum.back() << " " << to_string() << std::endl;
-        return std::abs(v.back() - vf) < v_precision && std::abs(a.back() - af) < a_precision
-            && a[1] >= aLowLim && a[3] >= aLowLim && a[5] >= aLowLim
-            && a[1] <= aUppLim && a[3] <= aUppLim && a[5] <= aUppLim;
+        return robust_vel_check(v.back(), vf) &&
+               robust_acc_check(a.back(), af) &&
+               a[1] >= aLowLim &&
+               a[3] >= aLowLim &&
+               a[5] >= aLowLim &&
+               a[1] <= aUppLim &&
+               a[3] <= aUppLim &&
+               a[5] <= aUppLim;
     }
 
     template<ControlSigns control_signs, ReachedLimits limits>
@@ -135,16 +223,16 @@ public:
             return false;
         }
 
-        t_sum = {0, t[1], t[1], t[1], t[1], t[1], t[1]};
+        t_sum = { 0, t[1], t[1], t[1], t[1], t[1], t[1] };
         if (t_sum.back() > t_max) { // For numerical reasons, is that needed?
             return false;
         }
 
-        j = {0, 0, 0, 0, 0, 0, 0};
-        a = {0, (t[1] > 0) ? aUp : 0, 0, 0, 0, 0, 0, af};
+        j = { 0, 0, 0, 0, 0, 0, 0 };
+        a = { 0, (t[1] > 0) ? aUp : 0, 0, 0, 0, 0, 0, af };
         for (size_t i = 0; i < 7; ++i) {
-            v[i+1] = v[i] + t[i] * a[i];
-            p[i+1] = p[i] + t[i] * (v[i] + t[i] * a[i] / 2);
+            v[i + 1] = v[i] + t[i] * a[i];
+            p[i + 1] = p[i] + t[i] * (v[i] + t[i] * a[i] / 2);
         }
 
         this->control_signs = control_signs;
@@ -171,18 +259,24 @@ public:
 
     // For third-order position interface
     template<ControlSigns control_signs, ReachedLimits limits, bool set_limits = false>
-    bool check(double jf, double vMax, double vMin, double aMax, double aMin) {
+    bool check(double jf, double vMax, double vMin, double aMax, double aMin, double epsTime = t_precision) {
+        if (t[0] < 0 && t[0] > -epsTime) {
+            t[0] = 0.0;
+        }
         if (t[0] < 0) {
             return false;
         }
 
         t_sum[0] = t[0];
         for (size_t i = 0; i < 6; ++i) {
-            if (t[i+1] < 0) {
+            if (t[i + 1] < 0 && t[i + 1] > -epsTime) {
+                t[i + 1] = 0.0;
+            }
+            if (t[i + 1] < 0) {
                 return false;
             }
 
-            t_sum[i+1] = t_sum[i] + t[i+1];
+            t_sum[i + 1] = t_sum[i] + t[i + 1];
         }
 
         if constexpr (limits == ReachedLimits::ACC0_ACC1_VEL || limits == ReachedLimits::ACC0_VEL || limits == ReachedLimits::ACC1_VEL || limits == ReachedLimits::VEL) {
@@ -208,19 +302,17 @@ public:
         }
 
         if constexpr (control_signs == ControlSigns::UDDU) {
-            j = {(t[0] > 0 ? jf : 0), 0, (t[2] > 0 ? -jf : 0), 0, (t[4] > 0 ? -jf : 0), 0, (t[6] > 0 ? jf : 0)};
+            j = { (t[0] > 0 ? jf : 0), 0, (t[2] > 0 ? -jf : 0), 0, (t[4] > 0 ? -jf : 0), 0, (t[6] > 0 ? jf : 0) };
         } else {
-            j = {(t[0] > 0 ? jf : 0), 0, (t[2] > 0 ? -jf : 0), 0, (t[4] > 0 ? jf : 0), 0, (t[6] > 0 ? -jf : 0)};
+            j = { (t[0] > 0 ? jf : 0), 0, (t[2] > 0 ? -jf : 0), 0, (t[4] > 0 ? jf : 0), 0, (t[6] > 0 ? -jf : 0) };
         }
 
         direction = (vMax > 0) ? Profile::Direction::UP : Profile::Direction::DOWN;
-        const double vUppLim = (direction == Profile::Direction::UP ? vMax : vMin) + v_eps;
-        const double vLowLim = (direction == Profile::Direction::UP ? vMin : vMax) - v_eps;
 
         for (size_t i = 0; i < 7; ++i) {
-            a[i+1] = a[i] + t[i] * j[i];
-            v[i+1] = v[i] + t[i] * (a[i] + t[i] * j[i] / 2);
-            p[i+1] = p[i] + t[i] * (v[i] + t[i] * (a[i] / 2 + t[i] * j[i] / 6));
+            a[i + 1] = a[i] + t[i] * j[i];
+            v[i + 1] = v[i] + t[i] * (a[i] + t[i] * j[i] / 2);
+            p[i + 1] = p[i] + t[i] * (v[i] + t[i] * (a[i] / 2 + t[i] * j[i] / 6));
 
             if constexpr (limits == ReachedLimits::ACC0_ACC1_VEL || limits == ReachedLimits::ACC0_ACC1 || limits == ReachedLimits::ACC0_VEL || limits == ReachedLimits::ACC1_VEL || limits == ReachedLimits::VEL) {
                 if (i == 2) {
@@ -246,9 +338,9 @@ public:
                 }
             }
 
-            if (i > 1 && a[i+1] * a[i] < -std::numeric_limits<double>::epsilon()) {
+            if (i > 1 && a[i + 1] * a[i] < -std::numeric_limits<double>::epsilon()) {
                 const double v_a_zero = v[i] - (a[i] * a[i]) / (2 * j[i]);
-                if (v_a_zero > vUppLim || v_a_zero < vLowLim) {
+                if (!robust_upper_vel_limit_check(v_a_zero, std::abs(vMax)) || !robust_lower_vel_limit_check(v_a_zero, -std::abs(vMin))) {
                     return false;
                 }
             }
@@ -257,22 +349,27 @@ public:
         this->control_signs = control_signs;
         this->limits = limits;
 
-        const double aUppLim = (direction == Profile::Direction::UP ? aMax : aMin) + a_eps;
-        const double aLowLim = (direction == Profile::Direction::UP ? aMin : aMax) - a_eps;
-
         // Velocity limit can be broken in the beginning if both initial velocity and acceleration are too high
         // std::cout << std::setprecision(16) << "target: " << std::abs(p.back() - pf) << " " << std::abs(v.back() - vf) << " " << std::abs(a.back() - af) << " T: " << t_sum.back() << " " << to_string() << std::endl;
-        return std::abs(p.back() - pf) < p_precision && std::abs(v.back() - vf) < v_precision && std::abs(a.back() - af) < a_precision
-            && a[1] >= aLowLim && a[3] >= aLowLim && a[5] >= aLowLim
-            && a[1] <= aUppLim && a[3] <= aUppLim && a[5] <= aUppLim
-            && v[3] <= vUppLim && v[4] <= vUppLim && v[5] <= vUppLim && v[6] <= vUppLim
-            && v[3] >= vLowLim && v[4] >= vLowLim && v[5] >= vLowLim && v[6] >= vLowLim;
+        return robust_pos_check(p.back(), pf) &&
+               robust_vel_check(v.back(), vf) &&
+               robust_acc_check(a.back(), af) &&
+               robust_upper_acc_limit_check(a[1], std::abs(aMax)) &&
+               robust_upper_acc_limit_check(a[3], std::abs(aMax)) &&
+               robust_upper_acc_limit_check(a[5], std::abs(aMax)) &&
+               robust_lower_acc_limit_check(a[1], -std::abs(aMin)) &&
+               robust_lower_acc_limit_check(a[3], -std::abs(aMin)) &&
+               robust_lower_acc_limit_check(a[5], -std::abs(aMin)) &&
+               robust_upper_vel_limit_check(v[3], std::abs(vMax)) &&
+               robust_upper_vel_limit_check(v[4], std::abs(vMax)) &&
+               robust_lower_vel_limit_check(v[3], -std::abs(vMin)) &&
+               robust_lower_vel_limit_check(v[4], -std::abs(vMin));
     }
 
     template<ControlSigns control_signs, ReachedLimits limits>
     inline bool check_with_timing(double, double jf, double vMax, double vMin, double aMax, double aMin) {
         // Time doesn't need to be checked as every profile has a: tf - ... equation
-        return check<control_signs, limits>(jf, vMax, vMin, aMax, aMin); // && (std::abs(t_sum.back() - tf) < t_precision);
+        return check<control_signs, limits>(jf, vMax, vMin, aMax, aMin, t_precision_step2); // && (std::abs(t_sum.back() - tf) < t_precision);
     }
 
     template<ControlSigns control_signs, ReachedLimits limits>
@@ -304,28 +401,34 @@ public:
     // For second-order position interface
     template<ControlSigns control_signs, ReachedLimits limits>
     bool check_for_second_order(double aUp, double aDown, double vMax, double vMin) {
+        if (t[0] < 0 && t[0] > -t_precision) {
+            t[0] = 0.0;
+        }
         if (t[0] < 0) {
             return false;
         }
 
         t_sum[0] = t[0];
         for (size_t i = 0; i < 6; ++i) {
-            if (t[i+1] < 0) {
+            if (t[i + 1] < 0 && t[i + 1] > -t_precision) {
+                t[i + 1] = 0.0;
+            }
+            if (t[i + 1] < 0) {
                 return false;
             }
 
-            t_sum[i+1] = t_sum[i] + t[i+1];
+            t_sum[i + 1] = t_sum[i] + t[i + 1];
         }
 
         if (t_sum.back() > t_max) { // For numerical reasons, is that needed?
             return false;
         }
 
-        j = {0, 0, 0, 0, 0, 0, 0};
+        j = { 0, 0, 0, 0, 0, 0, 0 };
         if constexpr (control_signs == ControlSigns::UDDU) {
-            a = {(t[0] > 0 ? aUp : 0), 0, (t[2] > 0 ? aDown : 0), 0, (t[4] > 0 ? aDown : 0), 0, (t[6] > 0 ? aUp : 0), af};
+            a = { (t[0] > 0 ? aUp : 0), 0, (t[2] > 0 ? aDown : 0), 0, (t[4] > 0 ? aDown : 0), 0, (t[6] > 0 ? aUp : 0), af };
         } else {
-            a = {(t[0] > 0 ? aUp : 0), 0, (t[2] > 0 ? aDown : 0), 0, (t[4] > 0 ? aUp : 0), 0, (t[6] > 0 ? aDown : 0), af};
+            a = { (t[0] > 0 ? aUp : 0), 0, (t[2] > 0 ? aDown : 0), 0, (t[4] > 0 ? aUp : 0), 0, (t[6] > 0 ? aDown : 0), af };
         }
 
         direction = (vMax > 0) ? Profile::Direction::UP : Profile::Direction::DOWN;
@@ -333,8 +436,8 @@ public:
         const double vLowLim = (direction == Profile::Direction::UP ? vMin : vMax) - v_eps;
 
         for (size_t i = 0; i < 7; ++i) {
-            v[i+1] = v[i] + t[i] * a[i];
-            p[i+1] = p[i] + t[i] * (v[i] + t[i] * a[i] / 2);
+            v[i + 1] = v[i] + t[i] * a[i];
+            p[i + 1] = p[i] + t[i] * (v[i] + t[i] * a[i] / 2);
         }
 
         this->control_signs = control_signs;
@@ -342,9 +445,18 @@ public:
 
         // Velocity limit can be broken in the beginning if both initial velocity and acceleration are too high
         // std::cout << std::setprecision(16) << "target: " << std::abs(p.back() - pf) << " " << std::abs(v.back() - vf) << " " << std::abs(a.back() - af) << " T: " << t_sum.back() << " " << to_string() << std::endl;
-        return std::abs(p.back() - pf) < p_precision && std::abs(v.back() - vf) < v_precision
-            && v[2] <= vUppLim && v[3] <= vUppLim && v[4] <= vUppLim && v[5] <= vUppLim && v[6] <= vUppLim
-            && v[2] >= vLowLim && v[3] >= vLowLim && v[4] >= vLowLim && v[5] >= vLowLim && v[6] >= vLowLim;
+        return robust_pos_check(p.back(), pf) &&
+               robust_vel_check(v.back(), vf) &&
+               robust_upper_vel_limit_check(v[2], std::abs(vMax)) &&
+               robust_upper_vel_limit_check(v[3], std::abs(vMax)) &&
+               robust_upper_vel_limit_check(v[4], std::abs(vMax)) &&
+               robust_upper_vel_limit_check(v[5], std::abs(vMax)) &&
+               v[6] <= vUppLim &&
+               robust_lower_vel_limit_check(v[2], -std::abs(vMin)) &&
+               robust_lower_vel_limit_check(v[3], -std::abs(vMin)) &&
+               robust_lower_vel_limit_check(v[4], -std::abs(vMin)) &&
+               robust_lower_vel_limit_check(v[5], -std::abs(vMin)) &&
+               v[6] >= vLowLim;
     }
 
     template<ControlSigns control_signs, ReachedLimits limits>
@@ -367,16 +479,16 @@ public:
             return false;
         }
 
-        t_sum = {0, 0, 0, t[3], t[3], t[3], t[3]};
+        t_sum = { 0, 0, 0, t[3], t[3], t[3], t[3] };
         if (t_sum.back() > t_max) { // For numerical reasons, is that needed?
             return false;
         }
 
-        j = {0, 0, 0, 0, 0, 0, 0};
-        a = {0, 0, 0, 0, 0, 0, 0, af};
-        v = {0, 0, 0, t[3] > 0 ? vUp : 0, 0, 0, 0, vf};
+        j = { 0, 0, 0, 0, 0, 0, 0 };
+        a = { 0, 0, 0, 0, 0, 0, 0, af };
+        v = { 0, 0, 0, t[3] > 0 ? vUp : 0, 0, 0, 0, vf };
         for (size_t i = 0; i < 7; ++i) {
-            p[i+1] = p[i] + t[i] * (v[i] + t[i] * a[i] / 2);
+            p[i + 1] = p[i] + t[i] * (v[i] + t[i] * a[i] / 2);
         }
 
         this->control_signs = control_signs;
@@ -429,7 +541,6 @@ public:
             const double D = a * a - 2 * j * v;
             if (std::abs(D) < std::numeric_limits<double>::epsilon()) {
                 check_position_extremum(-a / j, t_sum, t, p, v, a, j, ext);
-
             } else if (D > 0.0) {
                 const double D_sqrt = std::sqrt(D);
                 check_position_extremum((-a - D_sqrt) / j, t_sum, t, p, v, a, j, ext);
@@ -453,7 +564,7 @@ public:
             }
         }
 
-        double t_current_sum {0.0};
+        double t_current_sum{ 0.0 };
         for (size_t i = 0; i < 7; ++i) {
             if (i > 0) {
                 t_current_sum = t_sum[i - 1];
@@ -473,7 +584,7 @@ public:
         return extrema;
     }
 
-    bool get_first_state_at_position(double pt, double& time, double time_after=0.0) const {
+    bool get_first_state_at_position(double pt, double& time, double time_after = 0.0) const {
         double t_cum = 0.0;
 
         for (size_t i = 0; i < 7; ++i) {
@@ -486,7 +597,7 @@ public:
                 return true;
             }
 
-            for (const double _t: roots::solve_cubic(j[i]/6, a[i]/2, v[i], p[i] - pt)) {
+            for (const double _t : roots::solve_cubic(j[i] / 6, a[i] / 2, v[i], p[i] - pt)) {
                 if (0 < _t && time_after - t_cum <= _t && _t <= t[i]) {
                     time = _t + t_cum;
                     return true;
@@ -524,6 +635,25 @@ public:
             case ControlSigns::UDDU: result += "_UDDU"; break;
             case ControlSigns::UDUD: result += "_UDUD"; break;
         }
+
+        result += "\n";
+        result += std::string("duration = [" + to_string_with_precision<double>(brake.duration + accel.duration + t_sum[6]) + "]\n");
+        result += std::string("p = [" + join(p, true) + "]\n");
+        result += std::string("v = [" + join(v, true) + "]\n");
+        result += std::string("a = [" + join(a, true) + "]\n");
+        result += std::string("j = [" + join(j, true) + "]\n");
+
+        result += std::string("brake.t = [" + join(brake.t, true) + "]\n");
+        result += std::string("brake.p = [" + join(brake.p, true) + "]\n");
+        result += std::string("brake.v = [" + join(brake.v, true) + "]\n");
+        result += std::string("brake.a = [" + join(brake.a, true) + "]\n");
+        result += std::string("brake.j = [" + join(brake.j, true) + "]\n");
+
+        result += std::string("accel.t = [" + join(accel.t, true) + "]\n");
+        result += std::string("accel.p = [" + join(accel.p, true) + "]\n");
+        result += std::string("accel.v = [" + join(accel.v, true) + "]\n");
+        result += std::string("accel.a = [" + join(accel.a, true) + "]\n");
+        result += std::string("accel.j = [" + join(accel.j, true) + "]\n");
         return result;
     }
 };

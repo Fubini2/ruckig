@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <iostream>
+#if defined(RUCKIG_FILE_OUTPUT)
+    #include <fstream>
+#endif
 #include <limits>
 #include <optional>
 #include <tuple>
@@ -25,10 +28,10 @@ template<size_t DOFs, template<class, size_t> class CustomVector = StandardVecto
 class TargetCalculator {
 private:
     template<class T> using Vector = CustomVector<T, DOFs>;
-    template<class T> using StandardVectorIntervals = StandardSizeVector<T, DOFs, 3*DOFs+1>;
+    template<class T> using StandardVectorIntervals = StandardSizeVector<T, DOFs, 3 * DOFs + 1>;
 
-    constexpr static double eps {std::numeric_limits<double>::epsilon()};
-    constexpr static bool return_error_at_maximal_duration {true};
+    constexpr static double eps{ std::numeric_limits<double>::epsilon() };
+    constexpr static bool return_error_at_maximal_duration{ false };
 
     Vector<double> new_phase_control, pd; // For phase synchronization
     StandardVectorIntervals<double> possible_t_syncs;
@@ -105,12 +108,11 @@ private:
 
             const double current_scale = scale_vector->operator[](dof);
             if (
-                (inp_per_dof_control_interface[dof] == ControlInterface::Position && std::abs(pd[dof] - pd_scale * current_scale) > eps)
-                || std::abs(inp.current_velocity[dof] - v0_scale * current_scale) > eps
-                || std::abs(inp.current_acceleration[dof] - a0_scale * current_scale) > eps
-                || std::abs(inp.target_velocity[dof] - vf_scale * current_scale) > eps
-                || std::abs(inp.target_acceleration[dof] - af_scale * current_scale) > eps
-            ) {
+                (inp_per_dof_control_interface[dof] == ControlInterface::Position && std::abs(pd[dof] - pd_scale * current_scale) > eps) ||
+                std::abs(inp.current_velocity[dof] - v0_scale * current_scale) > eps ||
+                std::abs(inp.current_acceleration[dof] - a0_scale * current_scale) > eps ||
+                std::abs(inp.target_velocity[dof] - vf_scale * current_scale) > eps ||
+                std::abs(inp.target_acceleration[dof] - af_scale * current_scale) > eps) {
                 return false;
             }
 
@@ -124,7 +126,7 @@ private:
         // Check for (degrees_of_freedom == 1 && !t_min && !discrete_duration) is now outside
 
         // Possible t_syncs are the start times of the intervals and optional t_min
-        bool any_interval {false};
+        bool any_interval{ false };
         for (size_t dof = 0; dof < degrees_of_freedom; ++dof) {
             // Ignore DoFs without synchronization here
             if (inp_per_dof_synchronization[dof] == Synchronization::None) {
@@ -143,7 +145,7 @@ private:
         any_interval |= t_min.has_value();
 
         if (discrete_duration) {
-            for (auto& possible_t_sync: possible_t_syncs) {
+            for (auto& possible_t_sync : possible_t_syncs) {
                 if (std::isinf(possible_t_sync)) {
                     continue;
                 }
@@ -163,7 +165,7 @@ private:
         // Start at last tmin (or worse)
         for (auto i = idx.begin() + degrees_of_freedom - 1; i != idx_end; ++i) {
             const double possible_t_sync = possible_t_syncs[*i];
-            bool is_blocked {false};
+            bool is_blocked{ false };
             for (size_t dof = 0; dof < degrees_of_freedom; ++dof) {
                 if (inp_per_dof_synchronization[dof] == Synchronization::None) {
                     continue; // inner dof loop
@@ -178,7 +180,7 @@ private:
             }
 
             t_sync = possible_t_sync;
-            if (*i == 3*degrees_of_freedom) { // Optional t_min
+            if (*i == 3 * degrees_of_freedom) { // Optional t_min
                 limiting_dof = std::nullopt;
                 return true;
             }
@@ -206,10 +208,10 @@ public:
     size_t degrees_of_freedom;
 
     template<size_t D = DOFs, typename std::enable_if<(D >= 1), int>::type = 0>
-    explicit TargetCalculator(): degrees_of_freedom(DOFs) { }
+    explicit TargetCalculator() : degrees_of_freedom(DOFs) {}
 
     template<size_t D = DOFs, typename std::enable_if<(D == 0), int>::type = 0>
-    explicit TargetCalculator(size_t dofs): degrees_of_freedom(dofs) {
+    explicit TargetCalculator(size_t dofs) : degrees_of_freedom(dofs) {
         blocks.resize(dofs);
         inp_min_velocity.resize(dofs);
         inp_min_acceleration.resize(dofs);
@@ -217,8 +219,8 @@ public:
         inp_per_dof_synchronization.resize(dofs);
         new_phase_control.resize(dofs);
         pd.resize(dofs);
-        possible_t_syncs.resize(3*dofs+1);
-        idx.resize(3*dofs+1);
+        possible_t_syncs.resize(3 * dofs + 1);
+        idx.resize(3 * dofs + 1);
     }
 
     //! Calculate the time-optimal waypoint-based trajectory
@@ -229,7 +231,20 @@ public:
         traj.resize(0);
 #endif
 
+#if defined(RUCKIG_FILE_OUTPUT)
+        // Redirect std::cout to file.
+        std::ofstream out("Ruckig_Debug.log", std::ios::app);
+        std::streambuf* coutbuf = std::cout.rdbuf(); // save old buf
+        std::cout.rdbuf(out.rdbuf());                // redirect std::cout to out.txt!
+        std::cout << "Input:" << inp.to_string() << std::endl;
+
+        std::cout << "##### Step 1 #####" << std::endl;
+#endif
         for (size_t dof = 0; dof < degrees_of_freedom; ++dof) {
+#if defined(RUCKIG_FILE_OUTPUT)
+            std::cout << "*******"
+                      << " Dof " << dof << " *******" << std::endl;
+#endif
             auto& p = traj.profiles[0][dof];
 
             inp_min_velocity[dof] = inp.min_velocity ? inp.min_velocity.value()[dof] : -inp.max_velocity[dof];
@@ -253,7 +268,7 @@ public:
                 case ControlInterface::Position: {
                     if (!std::isinf(inp.max_jerk[dof])) {
                         p.brake.get_position_brake_trajectory(inp.current_velocity[dof], inp.current_acceleration[dof], inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof], inp.max_jerk[dof]);
-                        // p.accel.get_position_brake_trajectory(inp.target_velocity[dof], inp.target_acceleration[dof], inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof], inp.max_jerk[dof]);
+                        p.accel.get_position_brake_trajectory(inp.target_velocity[dof], (-1.0) * inp.target_acceleration[dof], inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof], inp.max_jerk[dof]);
                     } else if (!std::isinf(inp.max_acceleration[dof])) {
                         p.brake.get_second_order_position_brake_trajectory(inp.current_velocity[dof], inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof]);
                         // p.accel.get_second_order_position_brake_trajectory(inp.target_velocity[dof], inp.target_acceleration[dof], inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof]);
@@ -275,32 +290,32 @@ public:
             // Finalize pre & post-trajectories
             if (!std::isinf(inp.max_jerk[dof])) {
                 p.brake.finalize(p.p[0], p.v[0], p.a[0]);
-                // p.accel.finalize(p.pf, p.vf, p.af);
+                p.accel.finalizeInvTime(p.pf, p.vf, p.af);
             } else if (!std::isinf(inp.max_acceleration[dof])) {
                 p.brake.finalize_second_order(p.p[0], p.v[0], p.a[0]);
                 // p.accel.finalize_second_order(p.pf, p.vf, p.af);
             }
 
-            bool found_profile {false};
+            bool found_profile{ false };
             switch (inp_per_dof_control_interface[dof]) {
                 case ControlInterface::Position: {
                     if (!std::isinf(inp.max_jerk[dof])) {
-                        PositionThirdOrderStep1 step1 {p.p[0], p.v[0], p.a[0], p.pf, p.vf, p.af, inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof], inp.max_jerk[dof]};
+                        PositionThirdOrderStep1 step1{ p.p[0], p.v[0], p.a[0], p.pf, p.vf, p.af, inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof], inp.max_jerk[dof] };
                         found_profile = step1.get_profile(p, blocks[dof]);
                     } else if (!std::isinf(inp.max_acceleration[dof])) {
-                        PositionSecondOrderStep1 step1 {p.p[0], p.v[0], p.pf, p.vf, inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof]};
+                        PositionSecondOrderStep1 step1{ p.p[0], p.v[0], p.pf, p.vf, inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof] };
                         found_profile = step1.get_profile(p, blocks[dof]);
                     } else {
-                        PositionFirstOrderStep1 step1 {p.p[0], p.pf, inp.max_velocity[dof], inp_min_velocity[dof]};
+                        PositionFirstOrderStep1 step1{ p.p[0], p.pf, inp.max_velocity[dof], inp_min_velocity[dof] };
                         found_profile = step1.get_profile(p, blocks[dof]);
                     }
                 } break;
                 case ControlInterface::Velocity: {
                     if (!std::isinf(inp.max_jerk[dof])) {
-                        VelocityThirdOrderStep1 step1 {p.v[0], p.a[0], p.vf, p.af, inp.max_acceleration[dof], inp_min_acceleration[dof], inp.max_jerk[dof]};
+                        VelocityThirdOrderStep1 step1{ p.v[0], p.a[0], p.vf, p.af, inp.max_acceleration[dof], inp_min_acceleration[dof], inp.max_jerk[dof] };
                         found_profile = step1.get_profile(p, blocks[dof]);
                     } else {
-                        VelocitySecondOrderStep1 step1 {p.v[0], p.vf, inp.max_acceleration[dof], inp_min_acceleration[dof]};
+                        VelocitySecondOrderStep1 step1{ p.v[0], p.vf, inp.max_acceleration[dof], inp_min_acceleration[dof] };
                         found_profile = step1.get_profile(p, blocks[dof]);
                     }
                 } break;
@@ -325,7 +340,9 @@ public:
             }
 
             traj.independent_min_durations[dof] = blocks[dof].t_min;
-            // std::cout << dof << " profile step1: " << blocks[dof].to_string() << std::endl;
+#if defined(RUCKIG_FILE_OUTPUT)
+            std::cout << blocks[dof].to_string() << std::endl;
+#endif
         }
 
         const bool discrete_duration = (inp.duration_discretization == DurationDiscretization::Discrete);
@@ -335,6 +352,10 @@ public:
             traj.cumulative_times[0] = traj.duration;
             return Result::Working;
         }
+
+#if defined(RUCKIG_FILE_OUTPUT)
+        std::cout << "##### Step 2 #####" << std::endl;
+#endif
 
         std::optional<size_t> limiting_dof; // The DoF that doesn't need step 2
         const bool found_synchronization = synchronize(inp.minimum_duration, traj.duration, limiting_dof, traj.profiles[0], discrete_duration, delta_time);
@@ -389,15 +410,15 @@ public:
             return Result::Working;
         }
 
-        if (!discrete_duration && std::all_of(inp_per_dof_synchronization.begin(), inp_per_dof_synchronization.end(), [](Synchronization s){ return s == Synchronization::None; })) {
+        if (!discrete_duration && std::all_of(inp_per_dof_synchronization.begin(), inp_per_dof_synchronization.end(), [](Synchronization s) { return s == Synchronization::None; })) {
             return Result::Working;
         }
 
         // Phase Synchronization
-        if (limiting_dof && std::any_of(inp_per_dof_synchronization.begin(), inp_per_dof_synchronization.end(), [](Synchronization s){ return s == Synchronization::Phase; })) {
+        if (limiting_dof && std::any_of(inp_per_dof_synchronization.begin(), inp_per_dof_synchronization.end(), [](Synchronization s) { return s == Synchronization::Phase; })) {
             const Profile& p_limiting = traj.profiles[0][limiting_dof.value()];
             if (is_input_collinear(inp, p_limiting.direction, limiting_dof.value())) {
-                bool found_time_synchronization {true};
+                bool found_time_synchronization{ true };
                 for (size_t dof = 0; dof < degrees_of_freedom; ++dof) {
                     if (!inp.enabled[dof] || dof == limiting_dof || inp_per_dof_synchronization[dof] != Synchronization::Phase) {
                         continue;
@@ -454,7 +475,7 @@ public:
                     p.limits = p_limiting.limits; // After check method call to set correct limits
                 }
 
-                if (found_time_synchronization && std::all_of(inp_per_dof_synchronization.begin(), inp_per_dof_synchronization.end(), [](Synchronization s){ return s == Synchronization::Phase || s == Synchronization::None; })) {
+                if (found_time_synchronization && std::all_of(inp_per_dof_synchronization.begin(), inp_per_dof_synchronization.end(), [](Synchronization s) { return s == Synchronization::Phase || s == Synchronization::None; })) {
                     return Result::Working;
                 }
             }
@@ -462,8 +483,16 @@ public:
 
         // Time Synchronization
         for (size_t dof = 0; dof < degrees_of_freedom; ++dof) {
+#if defined(RUCKIG_FILE_OUTPUT)
+            std::cout << "*******"
+                      << " Dof " << dof << " *******" << std::endl;
+#endif
             const bool skip_synchronization = (dof == limiting_dof || inp_per_dof_synchronization[dof] == Synchronization::None) && !discrete_duration;
             if (!inp.enabled[dof] || skip_synchronization) {
+#if defined(RUCKIG_FILE_OUTPUT)
+                std::cout << "---- Optimal Profile (reference) ----" << std::endl
+                          << blocks[dof].p_min.to_string() << std::endl;
+#endif
                 continue;
             }
 
@@ -477,37 +506,37 @@ public:
 
             // Check if the final time corresponds to an extremal profile calculated in step 1
             // Use 2*eps because of numerical robustness in duration discretization
-            if (std::abs(t_profile - blocks[dof].t_min) < 2*eps) {
+            if (std::abs(t_profile - blocks[dof].t_min) < 2 * eps) {
                 p = blocks[dof].p_min;
                 continue;
-            } else if (blocks[dof].a && std::abs(t_profile - blocks[dof].a->right) < 2*eps) {
+            } else if (blocks[dof].a && std::abs(t_profile - blocks[dof].a->right) < 2 * eps) {
                 p = blocks[dof].a->profile;
                 continue;
-            } else if (blocks[dof].b && std::abs(t_profile - blocks[dof].b->right) < 2*eps) {
+            } else if (blocks[dof].b && std::abs(t_profile - blocks[dof].b->right) < 2 * eps) {
                 p = blocks[dof].b->profile;
                 continue;
             }
 
-            bool found_time_synchronization {false};
+            bool found_time_synchronization{ false };
             switch (inp_per_dof_control_interface[dof]) {
                 case ControlInterface::Position: {
                     if (!std::isinf(inp.max_jerk[dof])) {
-                        PositionThirdOrderStep2 step2 {t_profile, p.p[0], p.v[0], p.a[0], p.pf, p.vf, p.af, inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof], inp.max_jerk[dof]};
+                        PositionThirdOrderStep2 step2{ t_profile, p.p[0], p.v[0], p.a[0], p.pf, p.vf, p.af, inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof], inp.max_jerk[dof] };
                         found_time_synchronization = step2.get_profile(p);
                     } else if (!std::isinf(inp.max_acceleration[dof])) {
-                        PositionSecondOrderStep2 step2 {t_profile, p.p[0], p.v[0], p.pf, p.vf, inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof]};
+                        PositionSecondOrderStep2 step2{ t_profile, p.p[0], p.v[0], p.pf, p.vf, inp.max_velocity[dof], inp_min_velocity[dof], inp.max_acceleration[dof], inp_min_acceleration[dof] };
                         found_time_synchronization = step2.get_profile(p);
                     } else {
-                        PositionFirstOrderStep2 step2 {t_profile, p.p[0], p.pf, inp.max_velocity[dof], inp_min_velocity[dof]};
+                        PositionFirstOrderStep2 step2{ t_profile, p.p[0], p.pf, inp.max_velocity[dof], inp_min_velocity[dof] };
                         found_time_synchronization = step2.get_profile(p);
                     }
                 } break;
                 case ControlInterface::Velocity: {
                     if (!std::isinf(inp.max_jerk[dof])) {
-                        VelocityThirdOrderStep2 step2 {t_profile, p.v[0], p.a[0], p.vf, p.af, inp.max_acceleration[dof], inp_min_acceleration[dof], inp.max_jerk[dof]};
+                        VelocityThirdOrderStep2 step2{ t_profile, p.v[0], p.a[0], p.vf, p.af, inp.max_acceleration[dof], inp_min_acceleration[dof], inp.max_jerk[dof] };
                         found_time_synchronization = step2.get_profile(p);
                     } else {
-                        VelocitySecondOrderStep2 step2 {t_profile, p.v[0], p.vf, inp.max_acceleration[dof], inp_min_acceleration[dof]};
+                        VelocitySecondOrderStep2 step2{ t_profile, p.v[0], p.vf, inp.max_acceleration[dof], inp_min_acceleration[dof] };
                         found_time_synchronization = step2.get_profile(p);
                     }
                 } break;
@@ -519,8 +548,16 @@ public:
                     return Result::ErrorSynchronizationCalculation;
                 }
             }
-            // std::cout << dof << " profile step2: " << p.to_string() << std::endl;
+#if defined(RUCKIG_FILE_OUTPUT)
+            std::cout << "---- Optimal Profile ----" << std::endl
+                      << p.to_string() << std::endl;
+#endif
         }
+
+#if defined(RUCKIG_FILE_OUTPUT)
+        // assign cout back
+        std::cout.rdbuf(coutbuf);
+#endif
 
         return Result::Working;
     }

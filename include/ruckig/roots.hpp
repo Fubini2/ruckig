@@ -2,9 +2,9 @@
 
 #include <array>
 #include <algorithm>
-#include <cfloat>
 #include <cmath>
 
+constexpr double EPS_ROOT = 1.0e-80;
 
 namespace ruckig {
 
@@ -24,7 +24,7 @@ protected:
     using iterator = typename Container::iterator;
 
     Container data;
-    size_t size {0};
+    size_t size{ 0 };
 
 public:
     // Sort when accessing the elements
@@ -46,7 +46,7 @@ public:
 
 // Set that only inserts positive values
 template<typename T, size_t N>
-class PositiveSet: public Set<T, N> {
+class PositiveSet : public Set<T, N> {
 public:
     void insert(T value) {
         if (value >= 0) {
@@ -60,7 +60,7 @@ public:
 inline PositiveSet<double, 3> solve_cubic(double a, double b, double c, double d) {
     PositiveSet<double, 3> roots;
 
-    if (std::abs(d) < DBL_EPSILON) {
+    if (std::abs(d) < EPS_ROOT) {
         // First solution is x = 0
         roots.insert(0.0);
 
@@ -71,13 +71,12 @@ inline PositiveSet<double, 3> solve_cubic(double a, double b, double c, double d
         a = 0.0;
     }
 
-    if (std::abs(a) < DBL_EPSILON) {
-        if (std::abs(b) < DBL_EPSILON) {
+    if (std::abs(a) < EPS_ROOT) {
+        if (std::abs(b) < EPS_ROOT) {
             // Linear equation
-            if (std::abs(c) > DBL_EPSILON) {
+            if (std::abs(c) > EPS_ROOT) {
                 roots.insert(-d / c);
             }
-
         } else {
             // Quadratic equation
             const double discriminant = c * c - 4 * b * d;
@@ -88,7 +87,6 @@ inline PositiveSet<double, 3> solve_cubic(double a, double b, double c, double d
                 roots.insert((-c - y) * inv2b);
             }
         }
-
     } else {
         // Cubic equation
         const double inva = 1.0 / a;
@@ -102,7 +100,7 @@ inline PositiveSet<double, 3> solve_cubic(double a, double b, double c, double d
         constexpr double cos120 = -0.50;
         constexpr double sin120 = 0.866025403784438646764;
 
-        if (yy > DBL_EPSILON) {
+        if (yy > EPS_ROOT) {
             // Sqrt is positive: one real solution
             const double y = std::sqrt(yy);
             const double uuu = -halfq + y;
@@ -110,7 +108,7 @@ inline PositiveSet<double, 3> solve_cubic(double a, double b, double c, double d
             const double www = std::abs(uuu) > std::abs(vvv) ? uuu : vvv;
             const double w = std::cbrt(www);
             roots.insert(w - p / (3 * w) - bover3a);
-        } else if (yy < -DBL_EPSILON) {
+        } else if (yy < -EPS_ROOT) {
             // Sqrt is negative: three real solutions
             const double x = -halfq;
             const double y = std::sqrt(-yy);
@@ -118,7 +116,7 @@ inline PositiveSet<double, 3> solve_cubic(double a, double b, double c, double d
             double r;
 
             // Convert to polar form
-            if (std::abs(x) > DBL_EPSILON) {
+            if (std::abs(x) > EPS_ROOT) {
                 theta = (x > 0.0) ? std::atan(y / x) : (std::atan(y / x) + M_PI);
                 r = std::sqrt(x * x - yy);
             } else {
@@ -174,7 +172,6 @@ inline int solve_resolvent(std::array<double, 3>& x, double a, double b, double 
         x[1] = ux * cos120 - uyi * sin120 - a;
         x[2] = ux * cos120 + uyi * sin120 - a;
         return 3;
-
     } else {
         double A = -std::cbrt(std::abs(r) + std::sqrt(r2 - q3));
         if (r < 0.0) {
@@ -185,7 +182,7 @@ inline int solve_resolvent(std::array<double, 3>& x, double a, double b, double 
         x[0] = (A + B) - a;
         x[1] = -(A + B) / 2 - a;
         x[2] = std::sqrt(3) * (A - B) / 2;
-        if (std::abs(x[2]) < DBL_EPSILON) {
+        if (std::abs(x[2]) < EPS_ROOT) {
             x[2] = x[1];
             return 2;
         }
@@ -194,16 +191,17 @@ inline int solve_resolvent(std::array<double, 3>& x, double a, double b, double 
     }
 }
 
+constexpr double EPS_ROOT_SQRT = 1.0e-40;
 //! Calculate all roots of the monic quartic equation: x^4 + a*x^3 + b*x^2 + c*x + d = 0
 inline PositiveSet<double, 4> solve_quart_monic(double a, double b, double c, double d) {
     PositiveSet<double, 4> roots;
 
-    if (std::abs(d) < DBL_EPSILON) {
-        if (std::abs(c) < DBL_EPSILON) {
+    if (std::abs(d) < EPS_ROOT) {
+        if (std::abs(c) < EPS_ROOT_SQRT) {
             roots.insert(0.0);
 
             const double D = a * a - 4 * b;
-            if (std::abs(D) < DBL_EPSILON) {
+            if (std::abs(D) < EPS_ROOT) {
                 roots.insert(-a / 2);
             } else if (D > 0.0) {
                 const double sqrtD = std::sqrt(D);
@@ -213,7 +211,7 @@ inline PositiveSet<double, 4> solve_quart_monic(double a, double b, double c, do
             return roots;
         }
 
-        if (std::abs(a) < DBL_EPSILON && std::abs(b) < DBL_EPSILON) {
+        if (std::abs(a) < EPS_ROOT && std::abs(b) < EPS_ROOT) {
             roots.insert(0.0);
             roots.insert(-std::cbrt(c));
             return roots;
@@ -241,10 +239,10 @@ inline PositiveSet<double, 4> solve_quart_monic(double a, double b, double c, do
     double q1, q2, p1, p2;
 
     double D = y * y - 4 * d;
-    if (std::abs(D) < DBL_EPSILON) {
+    if (std::abs(D) < EPS_ROOT) {
         q1 = q2 = y / 2;
         D = a * a - 4 * (b - y);
-        if (std::abs(D) < DBL_EPSILON) {
+        if (std::abs(D) < EPS_ROOT) {
             p1 = p2 = a / 2;
         } else {
             const double sqrtD = std::sqrt(D);
@@ -259,7 +257,7 @@ inline PositiveSet<double, 4> solve_quart_monic(double a, double b, double c, do
         p2 = (c - a * q2) / (q1 - q2);
     }
 
-    constexpr double eps {16 * DBL_EPSILON};
+    constexpr double eps{ 16 * EPS_ROOT };
 
     D = p1 * p1 - 4 * q1;
     if (std::abs(D) < eps) {
@@ -296,7 +294,7 @@ inline double poly_eval(const std::array<double, N>& p, double x) {
         return retVal;
     }
 
-    if (std::abs(x) < DBL_EPSILON) {
+    if (std::abs(x) < EPS_ROOT) {
         retVal = p[N - 1];
     } else if (x == 1.0) {
         for (int i = N - 1; i >= 0; i--) {
@@ -316,8 +314,8 @@ inline double poly_eval(const std::array<double, N>& p, double x) {
 
 // Calculate the derivative poly coefficients of a given poly
 template<size_t N>
-inline std::array<double, N-1> poly_derivative(const std::array<double, N>& coeffs) {
-    std::array<double, N-1> deriv;
+inline std::array<double, N - 1> poly_derivative(const std::array<double, N>& coeffs) {
+    std::array<double, N - 1> deriv;
     for (size_t i = 0; i < N - 1; ++i) {
         deriv[i] = (N - 1 - i) * coeffs[i];
     }
@@ -325,8 +323,8 @@ inline std::array<double, N-1> poly_derivative(const std::array<double, N>& coef
 }
 
 template<size_t N>
-inline std::array<double, N-1> poly_monic_derivative(const std::array<double, N>& monic_coeffs) {
-    std::array<double, N-1> deriv;
+inline std::array<double, N - 1> poly_monic_derivative(const std::array<double, N>& monic_coeffs) {
+    std::array<double, N - 1> deriv;
     deriv[0] = 1.0;
     for (size_t i = 1; i < N - 1; ++i) {
         deriv[i] = (N - 1 - i) * monic_coeffs[i] / (N - 1);
@@ -335,7 +333,7 @@ inline std::array<double, N-1> poly_monic_derivative(const std::array<double, N>
 }
 
 // Safe Newton Method
-constexpr double tolerance {1e-14};
+constexpr double tolerance{ 1e-11 };
 
 // Calculate a single zero of polynom p(x) inside [lbound, ubound]
 // Requirements: p(lbound)*p(ubound) < 0, lbound < ubound

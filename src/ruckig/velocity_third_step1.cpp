@@ -1,17 +1,19 @@
+#include <cfloat>
+
 #include <ruckig/block.hpp>
 #include <ruckig/velocity.hpp>
 
 
 namespace ruckig {
 
-VelocityThirdOrderStep1::VelocityThirdOrderStep1(double v0, double a0, double vf, double af, double aMax, double aMin, double jMax): a0(a0), af(af), _aMax(aMax), _aMin(aMin), _jMax(jMax) {
+VelocityThirdOrderStep1::VelocityThirdOrderStep1(double v0, double a0, double vf, double af, double aMax, double aMin, double jMax) : a0(a0), af(af), _aMax(aMax), _aMin(aMin), _jMax(jMax) {
     vd = vf - v0;
 }
 
 void VelocityThirdOrderStep1::time_acc0(ProfileIter& profile, double aMax, double aMin, double jMax, bool) const {
-    profile->t[0] = (-a0 + aMax)/jMax;
-    profile->t[1] = (a0*a0 + af*af)/(2*aMax*jMax) - aMax/jMax + vd/aMax;
-    profile->t[2] = (-af + aMax)/jMax;
+    profile->t[0] = (-a0 + aMax) / jMax;
+    profile->t[1] = (a0 * a0 + af * af) / (2 * aMax * jMax) - aMax / jMax + vd / aMax;
+    profile->t[2] = (-af + aMax) / jMax;
     profile->t[3] = 0;
     profile->t[4] = 0;
     profile->t[5] = 0;
@@ -23,15 +25,15 @@ void VelocityThirdOrderStep1::time_acc0(ProfileIter& profile, double aMax, doubl
 }
 
 void VelocityThirdOrderStep1::time_none(ProfileIter& profile, double aMax, double aMin, double jMax, bool return_after_found) const {
-    double h1 = (a0*a0 + af*af)/2 + jMax*vd;
+    double h1 = (a0 * a0 + af * af) / 2 + jMax * vd;
     if (h1 >= 0.0) {
         h1 = std::sqrt(h1);
 
         // Solution 1
         {
-            profile->t[0] = -(a0 + h1)/jMax;
+            profile->t[0] = -(a0 + h1) / jMax;
             profile->t[1] = 0;
-            profile->t[2] = -(af + h1)/jMax;
+            profile->t[2] = -(af + h1) / jMax;
             profile->t[3] = 0;
             profile->t[4] = 0;
             profile->t[5] = 0;
@@ -47,9 +49,9 @@ void VelocityThirdOrderStep1::time_none(ProfileIter& profile, double aMax, doubl
 
         // Solution 2
         {
-            profile->t[0] = (-a0 + h1)/jMax;
+            profile->t[0] = (-a0 + h1) / jMax;
             profile->t[1] = 0;
-            profile->t[2] = (-af + h1)/jMax;
+            profile->t[2] = (-af + h1) / jMax;
             profile->t[3] = 0;
             profile->t[4] = 0;
             profile->t[5] = 0;
